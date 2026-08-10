@@ -3,7 +3,14 @@
 #   docker compose up --build
 #
 # Requires a merged checkpoint at ./artifacts/merged/current (make train merge)
-# and the NVIDIA container toolkit for the vllm service.
+# and GPU passthrough for the vllm service.
+#
+# On Linux that means the NVIDIA container toolkit. On Windows it means Docker
+# Desktop with the WSL2 backend, which registers an `nvidia` runtime and passes
+# the card through to Linux containers -- vLLM has no Windows wheel, but it does
+# not need one to run here. Confirm your setup before bringing the stack up:
+#
+#   docker run --rm --gpus all nvidia/cuda:12.6.0-base-ubuntu22.04 nvidia-smi
 #
 # Nothing is exposed except the gateway. vLLM listens on the internal network
 # only -- it has no authentication of its own, so publishing its port would

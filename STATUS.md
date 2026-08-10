@@ -23,13 +23,27 @@ Last updated: 2026-08-10
 
 ## Not done
 
-- **The serving stack has never run on a GPU.** vLLM publishes no Windows wheel
-  and this was built on Windows. The gateway is verified against a mocked and a
-  containerised upstream; the vLLM half is unverified in practice.
-- **No benchmark numbers.** The harness is tested but has never been pointed at
-  a served model, so `docs/results.md` §4 says `NOT YET RUN`.
+- **No benchmark numbers yet.** The harness is tested against a stub but has not
+  been pointed at a served model, so `docs/results.md` §4 says `NOT YET RUN`.
+  This is now unblocked rather than impossible — see below.
 - `.github/workflows/train.yml` needs a self-hosted GPU runner and has not been
   executed on one.
+
+### vLLM on Windows: it does run
+
+An earlier version of this file claimed the serving stack could not be verified
+here because vLLM publishes no Windows wheel. That is true of `pip install` and
+irrelevant to running it. Docker Desktop's WSL2 backend registers an `nvidia`
+container runtime and passes the card straight through, so the real vLLM image
+runs against the local RTX 4060. Confirmed on driver 591.86:
+
+```
+docker run --rm --gpus all nvidia/cuda:12.6.0-base-ubuntu22.04 nvidia-smi
+-> NVIDIA GeForce RTX 4060, 8188 MiB
+```
+
+No substitute inference server is needed, and none is used: the benchmarks will
+measure the same vLLM that `docker compose up` runs in production.
 
 ## What running it actually caught
 

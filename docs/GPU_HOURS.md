@@ -1,9 +1,14 @@
 # GPU hours: what to rent, and for how long
 
-**Short answer: for the reference 1.5B configuration you almost certainly do not
-need to rent anything. It fits on the 8 GB RTX 4060 you already have, in roughly
-3-6 hours. If you want it done in under an hour, one L40S or A100 for a single
-hour covers training, both evals and the benchmarks with room to spare.**
+**Short answer: for the reference 1.5B configuration you do not need to rent
+anything. Measured on an 8 GB RTX 4060: 9.35 samples/s and 4.6 GB peak VRAM,
+which is 1.2 hours of training. Add the two evals and the whole session is
+about 2.5 hours on a card you already own.**
+
+The first version of this document said 2.6-6 hours, from a modelled utilisation
+figure. A 20-step calibration measured the real one and it was **2.2x better**
+than assumed. The table below now carries the measurement for the 4060; every
+other row is still an assumption and is labelled as such.
 
 Regenerate every number below with:
 
@@ -30,6 +35,9 @@ prepared dataset with the real tokenizer:
 | Examples truncated at length 512 | 0.0% | measured |
 | **Total training tokens** | **4.82 M** | mean × 40,000 samples |
 | **Total compute** | **44.6 PFLOPs** | 6·N·T with gradient checkpointing |
+| **Measured throughput** | **9.35 samples/s** | 20-step calibration, RTX 4060 |
+| **Measured peak VRAM** | **4.6 GB** | of 8 GB available |
+| **Implied MFU** | **0.35** | 10.4 effective TFLOPs against 30 dense |
 
 The token count is the thing most estimates get wrong. Assuming every example
 fills `max_seq_len` would have put this at 41 M tokens and overstated the run by
@@ -52,33 +60,37 @@ Divide by the card's dense BF16 throughput times a realistic utilisation figure.
 
 ## The table (1.5B reference config)
 
-| GPU | VRAM | Effective TFLOPs | Est. hours | $/h | Est. $ | Fits |
-|---|---:|---:|---:|---:|---:|---|
-| RTX 4060 8GB (yours) | 8 GB | 4.8 | **2.6** | — | — | yes (~5.3 GB) |
-| RTX 4090 24GB | 24 GB | 36.3 | 0.34 | 0.40 | 0.14 | yes |
-| L4 24GB | 24 GB | 14.4 | 0.86 | 0.75 | 0.64 | yes |
-| A10G 24GB | 24 GB | 15.5 | 0.80 | 1.00 | 0.80 | yes |
-| L40S 48GB | 48 GB | 54.3 | 0.23 | 1.40 | 0.32 | yes |
-| A100 40GB | 40 GB | 99.8 | 0.12 | 1.60 | 0.20 | yes |
-| H100 80GB | 80 GB | 173.2 | 0.07 | 3.00 | 0.21 | yes |
+| GPU | VRAM | Assumed MFU | Effective TFLOPs | Est. hours | $/h | Est. $ | Fits |
+|---|---:|---:|---:|---:|---:|---:|---|
+| **RTX 4060 8GB (yours)** | 8 GB | **0.35 measured** | 10.5 | **1.18** | — | — | yes, 4.6 GB measured |
+| RTX 4090 24GB | 24 GB | 0.22 | 36.3 | 0.34 | 0.40 | 0.14 | yes |
+| L4 24GB | 24 GB | 0.24 | 14.4 | 0.86 | 0.75 | 0.64 | yes |
+| A10G 24GB | 24 GB | 0.25 | 15.5 | 0.80 | 1.00 | 0.80 | yes |
+| L40S 48GB | 48 GB | 0.30 | 54.3 | 0.23 | 1.40 | 0.32 | yes |
+| A100 40GB | 40 GB | 0.32 | 99.8 | 0.12 | 1.60 | 0.20 | yes |
+| H100 80GB | 80 GB | 0.35 | 173.2 | 0.07 | 3.00 | 0.21 | yes |
 
-### Read the caveat before you believe the fast end of that table
+### Only the first row is measured
 
-The FLOPs model assumes the GPU is **compute-bound**. At an effective batch of
-16 and ~121 tokens per example, each optimiser step processes only about **1,900
-tokens**. That is far too few to saturate an A100, let alone an H100. Below
-roughly 8k tokens per step the run is bound by per-step fixed costs — kernel
-launches, the optimiser, the dataloader — not by matrix multiplies.
+At an effective batch of 16 and ~121 tokens per example, each optimiser step
+processes about **1,900 tokens**. That is far too few to saturate an A100, let
+alone an H100: below roughly 8k tokens per step, per-step fixed costs — kernel
+launches, the optimiser, the dataloader — matter as much as the matrix
+multiplies.
 
-So:
+The consequence is that **every row is only as good as its assumed MFU, and the
+error can go either way**:
 
-- **The table is a lower bound.** On the fast datacentre cards expect **2-4x**
-  the quoted figure. An A100 will not finish this in 7 minutes; budget 20-30.
-- **The slow-card numbers are more trustworthy**, because a 4060 genuinely is
-  compute-bound on this workload.
-- Raising `train.per_device_batch_size` or enabling `train.packing` closes the
+- On the **4060** the original 0.16 assumption was too pessimistic. Measured
+  0.35. The estimate was wrong by 2.2x *in the safe direction*, but wrong.
+- On the **fast datacentre cards** the assumption is most likely too optimistic,
+  because fixed costs are a larger share of a shorter step. Treat the 0.07 h
+  H100 figure as a floor and budget 20-30 minutes, not 5.
+- Raising `train.per_device_batch_size` or turning on `train.packing` closes the
   gap. The reference config already uses batch 8 × accum 2 rather than 2 × 8 for
-  this reason.
+  exactly this reason.
+
+**Calibrate rather than argue with the table.** It takes two minutes.
 
 ### Getting a real number instead of a modelled one
 
@@ -98,19 +110,24 @@ Trust that over the table.
 Renting by the hour means paying for everything, including the parts that do not
 touch the GPU hard.
 
+Measured figures are marked; the rest are estimates.
+
 | Stage | 1.5B on an A100 | 1.5B on the 4060 |
 |---|---:|---:|
 | Model download (3.1 GB) | 2-5 min | 2-5 min |
-| Dataset prep (audit, clean, split, verify) | ~3 min | ~3 min |
-| **Baseline eval** (500 + 200 items) | 5-10 min | ~45 min |
-| **Training** | 20-30 min | 3-6 h |
+| Dataset prep (audit, clean, split, verify) | ~3 min | **~3 min measured** |
+| **Baseline eval** (500 + 200 items) | 5-10 min | **28 min measured** |
+| **Training** (2,500 steps) | 20-30 min | **1.2 h measured** |
 | Merge + verify | 2-4 min | 3-5 min |
-| Fine-tuned eval | 5-10 min | ~45 min |
-| vLLM startup + benchmark sweep | 8-12 min | 10-15 min |
-| **Total** | **~1 hour** | **~6-8 hours** |
+| Fine-tuned eval | 5-10 min | ~28 min |
+| vLLM startup + benchmark sweep | 8-12 min | 10-15 min (via WSL2, see below) |
+| **Total** | **~1 hour** | **~2.5 hours** |
 
-**Rent one hour of an L40S or A100 and it is comfortably enough.** Rent two if
-you want to try a second LoRA rank without watching the clock.
+**One hour of an L40S or A100 is comfortably enough.** Rent two if you want to
+try a second LoRA rank without watching the clock — but for this configuration
+the honest recommendation is to run it on the 4060 and spend nothing.
+
+The 7B profile is the one that actually needs rented hardware; see below.
 
 ## The 7B profile
 

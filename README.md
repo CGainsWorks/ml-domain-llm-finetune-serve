@@ -187,6 +187,14 @@ bearer-token auth against hashed keys, per-key **request and token** rate limits
 with `Retry-After`, a model allowlist, a prompt size cap checked before anything
 reaches the GPU, Prometheus metrics, and separate `/healthz` and `/readyz`.
 
+**On Windows this works too.** vLLM ships no Windows wheel, but it does not need
+one: Docker Desktop's WSL2 backend registers an `nvidia` runtime and passes the
+card through to Linux containers. Check yours before bringing the stack up:
+
+```bash
+docker run --rm --gpus all nvidia/cuda:12.6.0-base-ubuntu22.04 nvidia-smi
+```
+
 Known gap, stated rather than hidden: rate-limit buckets are in-process, so N
 replicas enforce N× the limit. Correct for one replica; horizontal scale needs
 Redis.

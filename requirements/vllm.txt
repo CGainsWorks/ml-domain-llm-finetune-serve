@@ -1,5 +1,16 @@
-# Inference server. Linux + CUDA only -- vLLM publishes no Windows wheel.
-# Run this inside serving/vllm/Dockerfile or on the rented GPU box.
+# Inference server. vLLM publishes no Windows wheel, so this cannot be pip
+# installed into a Windows venv.
+#
+# That does NOT mean you need a Linux box. Docker Desktop on Windows with the
+# WSL2 backend passes the GPU through to Linux containers, so
+# `docker compose up` runs the real vLLM server against a local NVIDIA card.
+# Verified on an RTX 4060 (driver 591.86): the `nvidia` runtime is registered
+# and `docker run --gpus all ... nvidia-smi` sees the device.
+#
+# Check yours with:
+#   docker run --rm --gpus all nvidia/cuda:12.6.0-base-ubuntu22.04 nvidia-smi
+#
+# Use this file inside serving/vllm/Dockerfile or on a Linux GPU box.
 -r serve.txt
 
 vllm==0.26.0
