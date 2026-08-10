@@ -151,8 +151,9 @@ class TestStreamingRequest:
 
 class TestPrompts:
     def test_falls_back_when_no_prepared_split(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        import dllm.bench.loadgen as lg
         from pathlib import Path
+
+        import dllm.bench.loadgen as lg
 
         monkeypatch.setattr(lg, "DATA_PROCESSED", Path("/nonexistent"))
         prompts = load_prompts(4)
