@@ -1,0 +1,146 @@
+name: train
+
+# Launch a LoRA fine-tune on a GPU runner.
+#
+# This needs a self-hosted runner with a CUDA device: GitHub's hosted runners
+# have no GPU, and there is no point pretending otherwise by running it on CPU
+# and reporting a number nobody should trust. Label your runner `gpu` and it
+# will pick this up.
+#
+# The workflow is written so that a re-run *resumes* rather than restarts. The
+# checkpoint directory is cached between runs, and `train.resume: auto` finds
+# the newest checkpoint, so a cancelled or timed-out run picks up where it left
+# off instead of burning the hours again.
+
+on:
+  workflow_dispatch:
+    inputs:
+      config:
+        description: Pipeline config to train with.
+        required: true
+        type: choice
+        options:
+          - configs/base.yaml
+          - configs/local_4060_8gb.yaml
+          - configs/rented_a100.yaml
+        default: configs/base.yaml
+      max_steps:
+        description: Cap training steps (-1 for the full run; use ~20 to calibrate).
+        required: false
+        type: string
+        default: "-1"
+      run_name:
+        description: Run name; also the checkpoint directory and cache key.
+        required: false
+        type: string
+        default: sql-lora-1p5b
+
+permissions:
+  contents: read
+
+jobs:
+  train:
+    name: LoRA fine-tune
+    runs-on: [self-hosted, gpu]
+    timeout-minutes: 720
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Report the hardware we actually got
+        run: |
+          nvidia-smi
+          python -c "import torch; print(torch.__version__, torch.cuda.get_device_name(0), 'bf16=', torch.cuda.is_bf16_supported())"
+
+      - name: Install
+        run: bash scripts/setup.sh
+
+      - name: Licence audit
+        run: .venv/bin/python -m dllm.cli data audit --config "${{ inputs.config }}"
+
+      - name: Prepare data
+        run: .venv/bin/python -m dllm.cli data prepare --config "${{ inputs.config }}"
+
+      # Restore any checkpoint from a previous attempt so a re-run resumes.
+      # restore-keys means a partial match still restores, which is the point:
+      # the exact key only exists once the run has finished.
+      - name: Restore checkpoints
+        uses: actions/cache@v4
+        with:
+          path: artifacts/checkpoints/${{ inputs.run_name }}
+          key: ckpt-${{ inputs.run_name }}-${{ github.sha }}
+          restore-keys: |
+            ckpt-${{ inputs.run_name }}-
+
+      - name: Estimate before committing the hours
+        run: .venv/bin/python -m dllm.cli train estimate --config "${{ inputs.config }}"
+
+      # The baseline must exist before training, not after. Without a
+      # before-number the after-number is not a result, and the gate will
+      # refuse to promote anyway.
+      - name: Baseline eval (only if not already committed)
+        run: |
+          if [ -f evals/results/baseline.json ]; then
+            echo "baseline scorecard present, skipping"
+          else
+            .venv/bin/python -m dllm.cli eval run --config "${{ inputs.config }}" --label baseline
+          fi
+
+      - name: Train
+        run: |
+          .venv/bin/python -m dllm.cli train run \
+            --config "${{ inputs.config }}" \
+            --set train.run_name="${{ inputs.run_name }}" \
+            --set train.max_steps="${{ inputs.max_steps }}"
+
+      - name: Merge adapter
+        run: |
+          .venv/bin/python -m dllm.cli model merge \
+            --config "${{ inputs.config }}" \
+            --adapter "artifacts/checkpoints/${{ inputs.run_name }}/adapter" \
+            --out artifacts/merged/current
+
+      - name: Evaluate the fine-tuned model
+        run: |
+          .venv/bin/python -m dllm.cli eval run \
+            --config "${{ inputs.config }}" \
+            --label finetuned \
+            --model-path artifacts/merged/current
+
+      - name: Scorecard comparison
+        run: |
+          .venv/bin/python -m dllm.cli eval compare \
+            --baseline evals/results/baseline.json \
+            --candidate evals/results/finetuned.json \
+            --out docs/results_generated.md
+          cat docs/results_generated.md >> "$GITHUB_STEP_SUMMARY"
+
+      # Scorecards and the adapter are small and are the actual output of the
+      # run. The merged checkpoint is several GB and is regenerable from the
+      # adapter in two minutes, so it is deliberately not uploaded.
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: scorecards-${{ inputs.run_name }}
+          path: |
+            evals/results/*.json
+            evals/results/*.records.jsonl
+            docs/results_generated.md
+            artifacts/checkpoints/${{ inputs.run_name }}/train_summary.json
+            artifacts/checkpoints/${{ inputs.run_name }}/heartbeat.json
+
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: adapter-${{ inputs.run_name }}
+          path: artifacts/checkpoints/${{ inputs.run_name }}/adapter
+
+  # Apply the gate to whatever the training job produced. This does not deploy
+  # anything -- it reports whether the result *would* be deployable, so a failed
+  # fine-tune is visible here rather than at deploy time.
+  gate:
+    needs: train
+    uses: ./.github/workflows/eval-gate.yml
+    with:
+      candidate: evals/results/finetuned.json
+      baseline: evals/results/baseline.json
+      config: configs/base.yaml

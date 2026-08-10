@@ -10,6 +10,7 @@ non-zero on failure. That is what CI blocks on.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import sys
@@ -41,7 +42,25 @@ ConfigOpt = typer.Option("configs/base.yaml", "--config", "-c", help="Pipeline c
 SetOpt = typer.Option(None, "--set", "-s", help="Override, e.g. --set train.epochs=1")
 
 
+def _force_utf8_output() -> None:
+    """Make stdout/stderr UTF-8 so reports print on a Windows console.
+
+    Scorecards and gate reports contain Δ, ▲, ▼, ✅ and ❌. On Windows the
+    console encoding is cp1252 by default, and printing any of them raises
+    UnicodeEncodeError -- which killed the end-to-end smoke run at the final
+    step, after every stage had already succeeded. The markdown files are
+    written as UTF-8 regardless; this only affects the terminal.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is not None:
+            # An already-detached or non-reconfigurable stream is not fatal.
+            with contextlib.suppress(ValueError, OSError):
+                reconfigure(encoding="utf-8", errors="replace")
+
+
 def _setup_logging(verbose: bool = False) -> None:
+    _force_utf8_output()
     logging.basicConfig(
         level=logging.DEBUG if verbose else logging.INFO,
         format="%(asctime)s %(levelname)-7s %(name)s: %(message)s",

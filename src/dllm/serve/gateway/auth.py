@@ -66,16 +66,35 @@ class KeyStore:
     # ------------------------------------------------------------------ #
     @classmethod
     def from_entries(cls, entries: list[dict]) -> KeyStore:
-        keys = [
-            ApiKey(
-                key_id=e["key_id"],
-                key_hash=e["key_hash"],
-                tier=e.get("tier", "default"),
-                rpm=e.get("rpm"),
-                tokens_per_min=e.get("tokens_per_min"),
+        # Validate the shape explicitly. Getting this wrong is easy -- a shell
+        # that strips quotes, or a serialiser that unwraps a single-element
+        # array into a bare object -- and without these checks the failure is
+        # "TypeError: string indices must be integers" from deep inside a
+        # comprehension, which tells an operator nothing about what to fix.
+        if not isinstance(entries, list):
+            raise ValueError(
+                f"key store must be a JSON array of objects, got {type(entries).__name__}. "
+                'Expected: [{"key_id": "...", "key_hash": "...", "tier": "default"}]'
             )
-            for e in entries
-        ]
+        keys: list[ApiKey] = []
+        for i, e in enumerate(entries):
+            if not isinstance(e, dict):
+                raise ValueError(f"key store entry {i} must be an object, got {type(e).__name__}")
+            missing = {"key_id", "key_hash"} - set(e)
+            if missing:
+                raise ValueError(
+                    f"key store entry {i} is missing {sorted(missing)}. "
+                    "Mint entries with `dllm serve keys`."
+                )
+            keys.append(
+                ApiKey(
+                    key_id=str(e["key_id"]),
+                    key_hash=str(e["key_hash"]),
+                    tier=e.get("tier", "default"),
+                    rpm=e.get("rpm"),
+                    tokens_per_min=e.get("tokens_per_min"),
+                )
+            )
         return cls(keys)
 
     @classmethod

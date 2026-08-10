@@ -20,6 +20,12 @@
 *.gif          filter=lfs diff=lfs merge=lfs -text
 *.mp4          filter=lfs diff=lfs merge=lfs -text
 
-# Eval scorecards and benchmark JSON are small and must stay diffable.
-evals/results/**   -filter -diff -merge text
-docs/**            -filter -diff -merge text
+# Eval scorecards, benchmark JSON and generated docs are small and MUST stay
+# diffable: reviewing a metric change is the whole point of committing them,
+# and CI diffs docs/LICENCE_AUDIT.md to catch an un-audited registry change.
+#
+# Do NOT write `-diff` here. It marks the path binary, so `git diff` reports
+# only "Bin 2134 -> 2163 bytes" and the review value disappears silently.
+# `text` alone is what forces textual treatment plus LF normalisation.
+evals/results/**   text
+docs/**            text

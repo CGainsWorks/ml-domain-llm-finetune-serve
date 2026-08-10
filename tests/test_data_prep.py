@@ -179,3 +179,54 @@ class TestRegistry:
     def test_unknown_source_lists_alternatives(self) -> None:
         with pytest.raises(KeyError, match="Declared sources"):
             get_source("no_such_dataset")
+
+
+class TestGeneratedDocsAreDeterministic:
+    """CI fails the build if regenerating a committed doc produces a diff.
+
+    That check is only useful if the generator is deterministic. An embedded
+    generation timestamp would make it fire on every single run, and a check
+    that always fires gets deleted -- taking the real signal (a registry change
+    that was never re-audited) with it.
+    """
+
+    def test_licence_report_is_stable_across_calls(self) -> None:
+        from dllm.data.licence_audit import render_markdown
+
+        a = audit(["sql_create_context"], require_commercial=True)
+        b = audit(["sql_create_context"], require_commercial=True)
+        assert a["generated_at"] is not None, "the JSON manifest still records when it ran"
+        assert render_markdown(a) == render_markdown(b)
+
+    def test_licence_report_carries_no_timestamp(self) -> None:
+        from dllm.data.licence_audit import render_markdown
+
+        body = render_markdown(audit(["sql_create_context"], require_commercial=True))
+        assert "Generated:" not in body
+        assert "20" not in body.split("## Sources")[0].replace("CC-BY-4.0", "").replace(
+            "CC-BY-SA-4.0", ""
+        ), "no year-like token should appear in the header"
+
+    def test_report_content_changes_when_the_registry_does(self) -> None:
+        """Deterministic must not mean constant."""
+        from dllm.data.licence_audit import render_markdown
+
+        commercial = render_markdown(audit(["sql_create_context"], require_commercial=True))
+        rejected = render_markdown(audit(["alpaca_REJECTED"], require_commercial=True))
+        assert commercial != rejected
+
+    def test_dataset_card_is_stable_across_calls(self) -> None:
+        from dllm.config import load_config
+        from dllm.data.dataset_card import render_dataset_card
+        from dllm.paths import CONFIGS
+
+        cfg = load_config(CONFIGS / "base.yaml")
+        assert render_dataset_card(cfg) == render_dataset_card(cfg)
+
+    def test_dataset_card_carries_no_timestamp(self) -> None:
+        from dllm.config import load_config
+        from dllm.data.dataset_card import render_dataset_card
+        from dllm.paths import CONFIGS
+
+        body = render_dataset_card(load_config(CONFIGS / "base.yaml"))
+        assert "Last generated" not in body

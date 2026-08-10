@@ -45,6 +45,20 @@ class TestKeyStore:
         store = KeyStore.load()
         assert store.verify(entry["key"]) is not None
 
+    def test_bare_object_instead_of_array_is_explained(self) -> None:
+        """The single most likely misconfiguration, and it must say so."""
+        entry = mint_keys(1)[0]
+        with pytest.raises(ValueError, match="must be a JSON array"):
+            KeyStore.from_entries({k: v for k, v in entry.items() if k != "key"})
+
+    def test_missing_required_field_names_it(self) -> None:
+        with pytest.raises(ValueError, match="key_hash"):
+            KeyStore.from_entries([{"key_id": "abc"}])
+
+    def test_non_object_entry_is_explained(self) -> None:
+        with pytest.raises(ValueError, match="must be an object"):
+            KeyStore.from_entries(["not-an-object"])
+
     def test_missing_config_yields_empty_store(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """No keys must mean 'refuse everything', never 'allow everything'."""
         monkeypatch.delenv("DLLM_GATEWAY_KEYS", raising=False)
