@@ -12,16 +12,49 @@ VENV="${VENV:-.venv}"
 
 cd "$(dirname "$0")/.."
 
-# Git Bash on Windows ships `python` but usually not `python3`, so defaulting to
-# python3 makes this script fail on exactly the machines most likely to be a
-# self-hosted GPU runner.
-if [ -z "${PY:-}" ]; then
-  if command -v python3 >/dev/null 2>&1; then
-    PY=python3
-  elif command -v python >/dev/null 2>&1; then
-    PY=python
-  else
-    echo "no python interpreter on PATH" >&2
+# Finding a usable interpreter is genuinely fiddly on Windows, and getting it
+# wrong builds a venv that fails much later with a confusing error:
+#
+#   * `command -v python3` succeeds even when python3 is the Microsoft Store
+#     stub in WindowsApps. Running it prints an advert and exits non-zero.
+#   * `python` is often an older system install. This project needs >= 3.10
+#     (transformers 5, peft, trl, vLLM and mlflow all require it), and a 3.9
+#     venv gets most of the way through pip before failing.
+#
+# So: try candidates in order, and accept one only if it actually executes and
+# reports a high enough version.
+MIN_MINOR=10
+
+usable_python() {
+  local cand="$1" out minor
+  command -v "$cand" >/dev/null 2>&1 || return 1
+  out=$("$cand" -c 'import sys; print(sys.version_info[0], sys.version_info[1])' 2>/dev/null) || return 1
+  set -- $out
+  [ "${1:-0}" = "3" ] || return 1
+  minor="${2:-0}"
+  [ "$minor" -ge "$MIN_MINOR" ] || return 1
+  return 0
+}
+
+if [ -n "${PY:-}" ]; then
+  usable_python "$PY" || {
+    echo "PY=$PY is not a usable Python >= 3.$MIN_MINOR" >&2
+    exit 1
+  }
+else
+  PY=""
+  for cand in python3.12 python3.11 python3.10 python3 python; do
+    if usable_python "$cand"; then PY="$cand"; break; fi
+  done
+  if [ -z "$PY" ]; then
+    echo "no Python >= 3.$MIN_MINOR found on PATH." >&2
+    echo "Tried: python3.12 python3.11 python3.10 python3 python" >&2
+    echo "Checked versions:" >&2
+    for cand in python3 python; do
+      command -v "$cand" >/dev/null 2>&1 && \
+        echo "  $cand -> $("$cand" --version 2>&1 | head -1)" >&2
+    done
+    echo "Set PY=/path/to/python3.12 explicitly, or install a newer Python." >&2
     exit 1
   fi
 fi

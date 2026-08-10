@@ -78,6 +78,16 @@ jobs:
           nvidia-smi
           echo "runner OS: ${RUNNER_OS}"
 
+      # Provision the interpreter rather than trusting the runner's PATH. On a
+      # developer machine that PATH is whatever accumulated over time: here it
+      # offered the Microsoft Store stub as `python3` (exists, refuses to run)
+      # and Python 3.9 as `python` (runs, too old -- this project needs >= 3.10).
+      # A GPU runner is someone's desktop, so assuming a clean toolchain is the
+      # wrong assumption.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
       - name: Install
         shell: bash
         run: bash scripts/setup.sh
