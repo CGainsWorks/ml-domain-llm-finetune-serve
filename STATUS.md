@@ -34,12 +34,17 @@ evaluated, gated, registered, served and benchmarked.
 
 Numbers and their caveats: [docs/results.md](docs/results.md).
 
+`.github/workflows/train.yml` has also been executed, on a self-hosted
+ephemeral runner backed by the same RTX 4060: full 2,500-step run, merge, eval,
+and the gate scoring the artifact the training job produced. Both jobs green.
+That run and the manual one agree to ±0.002 — see
+[results.md §6](docs/results.md) for what that says about the gate threshold.
+
 ## Not done
 
-- `.github/workflows/train.yml` needs a self-hosted GPU runner and has not been
-  executed on one.
 - The 7B profile (`configs/rented_a100.yaml`) has never been trained. It does
-  not fit 8 GB and needs the rented card the brief anticipated.
+  not fit 8 GB and needs the rented card the brief anticipated. It is marked
+  `NOT YET RUN` in the file itself.
 
 ### vLLM on Windows: it does run
 
@@ -104,6 +109,20 @@ against it. They are listed because the list is the argument for doing so.
     healthy latencies. They were 429s from our own gateway at its 60 rpm
     default. The harness now counts them separately and refuses to mark such a
     run valid.
+14. **`train.yml`'s gate scored the wrong model.** It read scorecards from the
+    checkout, i.e. the committed ones, so a training run was gated against the
+    *previous* model while looking like it gated the new one. Now verified
+    fixed: the gate reported 0.8954 where the committed scorecard says 0.8932.
+15. **`shell: bash` was WSL's bash**, not Git Bash, on a Windows runner. It
+    mangled the script path into `C:Usersuser...` and failed with a
+    "No such file" that pointed nowhere near the cause.
+16. **Neither Python on the runner's PATH was usable**: `python3` was the
+    Microsoft Store stub (exists, refuses to run) and `python` was 3.9, below
+    this project's floor. `setup.sh` now probes by executing candidates and
+    reading `sys.version_info` rather than trusting a name on PATH.
+17. **`actions/setup-python` needs administrator rights** (it writes to HKLM),
+    which a self-hosted runner should not have. It is now best-effort with a
+    validated fallback.
 
 ## Next steps
 

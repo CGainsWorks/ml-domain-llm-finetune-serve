@@ -206,7 +206,41 @@ Full session on the 4060, end to end: ~2.5 hours including both evals.
 
 ---
 
-## 6. Merge fidelity
+## 6. Run-to-run variance, and what the gate threshold is worth
+
+The pipeline has been trained twice from scratch on the same card with the same
+seed: once by hand, once through `train.yml` on a self-hosted GitHub Actions
+runner. Independent checkouts, independent virtualenvs.
+
+| | Manual run | CI run (`train.yml`) | Δ |
+|---|---:|---:|---:|
+| `exec_acc_nonempty` | 0.8932 | 0.8954 | +0.0022 |
+| `schema_adherence` | 0.9960 | 0.9980 | +0.0020 |
+| `valid_sql_rate` | 0.9960 | 0.9980 | +0.0020 |
+| Final train loss | 0.029406 | 0.029349 | −0.000057 |
+| Wall clock | 4,135 s | 4,103 s | −32 s |
+| Peak VRAM | 4.826 GB | 4.826 GB | 0 |
+
+**Seeding does not buy bitwise determinism on a GPU.** Everything seedable is
+seeded — data order, shuffling, dropout, init — but cuDNN kernel selection and
+floating-point reduction order are not deterministic by default, so two runs of
+identical code diverge slightly and the divergence compounds over 2,500 steps.
+
+This is the number that makes the gate meaningful: **the noise floor on the gate
+metric is about ±0.002, and the promotion threshold is +0.05 — roughly 23× it.**
+A gate set at +0.002 would fire on coin flips. It is also why the 15.7-point
+measurement artefact in §3 mattered so much: it was 70× the noise, sitting
+inside a metric nobody was checking.
+
+If you need bitwise reproducibility rather than statistical, set
+`CUBLAS_WORKSPACE_CONFIG=:4096:8` and call
+`torch.use_deterministic_algorithms(True)`. It costs throughput and is not on by
+default here, because knowing the variance is more useful than pretending it is
+zero.
+
+---
+
+## 7. Merge fidelity
 
 `make merge` refuses to export a checkpoint that does not reproduce
 adapter-on-base behaviour. Measured on this run:
