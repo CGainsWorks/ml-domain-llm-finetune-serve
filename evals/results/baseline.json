@@ -1,0 +1,103 @@
+{
+  "label": "baseline",
+  "created_at": "2026-08-05T15:34:08+00:00",
+  "tasks": {
+    "sql_exec_holdout": {
+      "task_id": "sql_exec_holdout",
+      "n": 500,
+      "metrics": {
+        "exec_acc_nonempty": 0.786492,
+        "exec_acc": 0.786,
+        "schema_adherence": 0.988,
+        "valid_sql_rate": 0.998,
+        "exact_match_norm": 0.596,
+        "exec_error_rate": 0.012,
+        "unparseable_rate": 0.002
+      },
+      "counts": {
+        "correct": 393,
+        "wrong": 100,
+        "unparseable": 1,
+        "not_read_only": 0,
+        "exec_error": 6,
+        "gold_unexecutable": 0,
+        "gold_nonempty": 459,
+        "correct_nonempty": 361,
+        "scorable": 500
+      }
+    },
+    "general_guard": {
+      "task_id": "general_guard",
+      "n": 200,
+      "metrics": {
+        "answers_in_prose": 0.995,
+        "non_empty_rate": 1.0,
+        "mean_chars": 232.94,
+        "keyword_overlap": 0.299672
+      },
+      "counts": {
+        "sql_shaped": 1,
+        "empty": 0
+      }
+    }
+  },
+  "metrics": {
+    "sql_exec_holdout.exec_acc_nonempty": 0.786492,
+    "sql_exec_holdout.exec_acc": 0.786,
+    "sql_exec_holdout.schema_adherence": 0.988,
+    "sql_exec_holdout.valid_sql_rate": 0.998,
+    "sql_exec_holdout.exact_match_norm": 0.596,
+    "sql_exec_holdout.exec_error_rate": 0.012,
+    "sql_exec_holdout.unparseable_rate": 0.002,
+    "general_guard.answers_in_prose": 0.995,
+    "general_guard.non_empty_rate": 1.0,
+    "general_guard.mean_chars": 232.94,
+    "general_guard.keyword_overlap": 0.299672
+  },
+  "backend": {
+    "backend": "hf",
+    "model_path": "Qwen/Qwen2.5-1.5B-Instruct",
+    "base_model_id": "Qwen/Qwen2.5-1.5B-Instruct",
+    "revision": "989aa7980e4cf806f80c7fef2b1adb7bc71aa306",
+    "adapter_path": null,
+    "dtype": "bfloat16",
+    "device": "cuda:0",
+    "torch": "2.13.0+cu126"
+  },
+  "generation": {
+    "max_new_tokens": 160,
+    "temperature": 0.0,
+    "top_p": 1.0,
+    "stop": [
+      "\n\n",
+      "```",
+      ";"
+    ],
+    "seed": 1337
+  },
+  "prompt_versions": {
+    "sql": "sql_v1",
+    "guard": "guard_v1"
+  },
+  "dataset_fingerprint": {
+    "sql_exec_holdout": {
+      "n": 500,
+      "items_sha256_16": "856cb1b710a801c6",
+      "dataset": "data/processed/test.jsonl",
+      "generation_seconds": 984.06
+    },
+    "general_guard": {
+      "n": 200,
+      "items_sha256_16": "eeb8befe82ac36d7",
+      "dataset": "data/processed/guard.jsonl",
+      "generation_seconds": 702.54
+    }
+  },
+  "runtime_s": 1689.73,
+  "git_commit": "3a66dc9",
+  "env": {
+    "python": "3.12.0",
+    "platform": "Windows-11-10.0.26200-SP0"
+  },
+  "schema_version": 1
+}
