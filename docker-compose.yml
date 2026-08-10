@@ -1,0 +1,75 @@
+# The serving half of the pipeline: vLLM behind an authenticated gateway.
+#
+#   docker compose up --build
+#
+# Requires a merged checkpoint at ./artifacts/merged/current (make train merge)
+# and the NVIDIA container toolkit for the vllm service.
+#
+# Nothing is exposed except the gateway. vLLM listens on the internal network
+# only -- it has no authentication of its own, so publishing its port would
+# hand the GPU to anyone who can reach the host.
+
+services:
+  vllm:
+    build:
+      context: .
+      dockerfile: serving/vllm/Dockerfile
+    image: dllm-vllm:0.1.0
+    environment:
+      MODEL_DIR: /models/current
+      SERVED_MODEL_NAME: ${SERVED_MODEL_NAME:-domain-sql}
+      MAX_MODEL_LEN: ${MAX_MODEL_LEN:-2048}
+      GPU_MEMORY_UTILIZATION: ${GPU_MEMORY_UTILIZATION:-0.85}
+      MAX_NUM_SEQS: ${MAX_NUM_SEQS:-64}
+      DTYPE: ${DTYPE:-bfloat16}
+      HF_HOME: /root/.cache/huggingface
+    volumes:
+      - ./artifacts/merged/current:/models/current:ro
+      - hf-cache:/root/.cache/huggingface
+    expose:
+      - "8000"
+    ipc: host          # vLLM needs a large /dev/shm for its workers
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8000/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      start_period: 180s
+      retries: 20
+    restart: unless-stopped
+
+  gateway:
+    build:
+      context: .
+      dockerfile: serving/gateway/Dockerfile
+    image: dllm-gateway:0.1.0
+    environment:
+      # JSON list of {key_id, key_hash, tier}. Mint with `dllm serve keys`.
+      # The gateway refuses every request if this is unset -- it never runs open.
+      DLLM_GATEWAY_KEYS: ${DLLM_GATEWAY_KEYS:-}
+      DLLM_REPO_ROOT: /app
+    command:
+      - python
+      - -m
+      - dllm.cli
+      - serve
+      - gateway
+      - --config
+      - configs/base.yaml
+      - --set
+      - serve.gateway.upstream_base_url=http://vllm:8000/v1
+    ports:
+      - "${GATEWAY_PORT:-8080}:8080"
+    depends_on:
+      vllm:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  hf-cache:
