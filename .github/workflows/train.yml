@@ -78,13 +78,20 @@ jobs:
           nvidia-smi
           echo "runner OS: ${RUNNER_OS}"
 
-      # Provision the interpreter rather than trusting the runner's PATH. On a
-      # developer machine that PATH is whatever accumulated over time: here it
-      # offered the Microsoft Store stub as `python3` (exists, refuses to run)
-      # and Python 3.9 as `python` (runs, too old -- this project needs >= 3.10).
-      # A GPU runner is someone's desktop, so assuming a clean toolchain is the
-      # wrong assumption.
+      # Best effort, not a requirement. Provisioning the interpreter is the
+      # right default -- a desktop's PATH is whatever accumulated over time, and
+      # this one offered the Microsoft Store stub as `python3` (exists, refuses
+      # to run) and Python 3.9 as `python` (runs, too old for this project).
+      #
+      # But setup-python writes to HKLM and therefore needs administrator
+      # rights, which a self-hosted runner should not have. On a non-admin
+      # Windows runner it fails with "Requested registry access is not allowed".
+      # So: try it, and fall back to whatever the operator put on the runner's
+      # PATH. scripts/setup.sh validates the version either way and refuses to
+      # build a venv on anything below 3.10, so the fallback cannot silently
+      # produce a broken environment.
       - uses: actions/setup-python@v5
+        continue-on-error: true
         with:
           python-version: "3.12"
 
