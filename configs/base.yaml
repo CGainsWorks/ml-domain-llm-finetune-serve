@@ -1,0 +1,140 @@
+# Reference configuration: the 8 GB profile everything else derives from.
+#
+# Base model: Qwen2.5-1.5B-Instruct. Chosen because it is Apache-2.0, ungated
+# (so CI needs no Hugging Face token), competent enough at SQL that the
+# baseline is a real number rather than zero, and small enough to LoRA-tune on
+# a single 8 GB consumer card. The revision is pinned to a commit: an unpinned
+# base model makes every eval number unreproducible.
+
+model:
+  id: Qwen/Qwen2.5-1.5B-Instruct
+  revision: 989aa7980e4cf806f80c7fef2b1adb7bc71aa306
+  licence: Apache-2.0
+  licence_url: https://www.apache.org/licenses/LICENSE-2.0
+  commercial_use: true
+  dtype: bfloat16
+  max_seq_len: 1024
+  trust_remote_code: false
+  attn_implementation: sdpa
+
+lora:
+  r: 16
+  alpha: 32
+  dropout: 0.05
+  bias: none
+  # All attention and MLP projections. Attention-only adapters underfit on
+  # text-to-SQL; the MLP is where most of the format learning lands.
+  target_modules: [q_proj, k_proj, v_proj, o_proj, gate_proj, up_proj, down_proj]
+
+quant:
+  enabled: false          # bf16 LoRA fits 8 GB at seq 1024, batch 2.
+  bits: 4
+  quant_type: nf4
+  double_quant: true
+  compute_dtype: bfloat16
+
+data:
+  source: sql_create_context
+  max_train_examples: 20000
+  max_eval_examples: 500
+  eval_fraction: 0.05
+  test_fraction: 0.05
+  seed: 1337
+  max_prompt_chars: 6000
+  dedupe: true
+  require_commercial_licence: true
+
+train:
+  run_name: sql-lora-1p5b
+  output_dir: artifacts/checkpoints/{run_name}
+  epochs: 2.0
+  max_steps: -1
+  lr: 2.0e-4
+  lr_scheduler: cosine
+  warmup_ratio: 0.03
+  weight_decay: 0.0
+  # Measured on the prepared data: mean 121 tokens/example, p95 150. Training
+  # at model.max_seq_len (1024) would pad and truncate against a length nothing
+  # reaches, so training length is set separately and the micro-batch raised to
+  # match. A micro-batch of 2 at ~120 tokens leaves the GPU launch-overhead
+  # bound rather than compute bound.
+  max_length: 512
+  # packing: true bin-packs several short examples into one sequence, which on
+  # this dataset (mean 121 tokens against a 512 cap) is a large throughput win.
+  # Left off by default so the reference run is the simpler thing to reason
+  # about; turn it on once the baseline comparison is established.
+  packing: false
+  packing_strategy: bfd
+  per_device_batch_size: 8
+  grad_accum_steps: 2      # effective batch 16, unchanged, so lr carries over
+  gradient_checkpointing: true
+  max_grad_norm: 1.0
+  optim: paged_adamw_8bit
+  seed: 1337
+  bf16: true
+  fp16: false
+  packing: false
+  completion_only_loss: true
+  # Checkpoint often: this is written for a GPU rented by the hour, where an
+  # interrupted run must resume rather than restart.
+  save_steps: 50
+  save_total_limit: 3
+  logging_steps: 5
+  eval_steps: 100
+  resume: auto
+  mlflow_experiment: domain-llm-sft
+  # SQLite, not the ./mlruns file store: MLflow 3 refuses the file store without
+  # an opt-out env var, and the model registry the promotion gate writes to has
+  # never supported it. Point this at a tracking server for a shared setup.
+  mlflow_tracking_uri: sqlite:///mlflow.db
+
+eval:
+  tasks: [sql_exec_holdout, general_guard]
+  generation:
+    max_new_tokens: 160
+    temperature: 0.0        # greedy: a sampled eval is not reproducible
+    top_p: 1.0
+    stop: ["\n\n", "```", ";"]
+    seed: 1337
+  backend:
+    kind: hf
+    device: auto
+    batch_size: 8
+  baseline_scorecard: evals/results/baseline.json
+  output: evals/results/{label}.json
+
+  # The gate. Numbers are set in configs/eval/thresholds.yaml so they can be
+  # tightened without touching anything else.
+  thresholds:
+    min_absolute:
+      sql_exec_holdout.valid_sql_rate: 0.98
+      sql_exec_holdout.schema_adherence: 0.95
+      general_guard.non_empty_rate: 0.98
+    min_delta_vs_baseline:
+      sql_exec_holdout.exec_acc_nonempty: 0.05
+    max_regression:
+      general_guard.answers_in_prose: 0.10
+      sql_exec_holdout.valid_sql_rate: 0.01
+
+serve:
+  vllm:
+    model: artifacts/merged/current
+    served_model_name: domain-sql
+    host: 0.0.0.0
+    port: 8000
+    dtype: bfloat16
+    max_model_len: 2048
+    gpu_memory_utilization: 0.85
+    max_num_seqs: 64
+    tensor_parallel_size: 1
+    enable_prefix_caching: true
+  gateway:
+    host: 0.0.0.0
+    port: 8080
+    upstream_base_url: http://localhost:8000/v1
+    request_timeout_s: 120.0
+    rate_limit_rpm: 60
+    rate_limit_burst: 10
+    rate_limit_tokens_per_min: 60000
+    max_prompt_chars: 8000
+    allowed_models: [domain-sql]

@@ -1,0 +1,65 @@
+# GPU reference data for the training-time estimator.
+#
+# `bf16_tflops_dense` is the *dense* BF16/FP16 tensor-core figure. Vendor
+# marketing usually quotes the 2:1 structured-sparsity number, which is double
+# and unreachable for this workload -- using it would halve every estimate.
+#
+# `mfu` is the model FLOPs utilisation actually expected for a 1-7B LoRA run at
+# sequence length ~1k with a small micro-batch. It is well below the 0.4-0.5 a
+# large pre-training job reaches: short sequences, small batches and a frozen
+# base with tiny adapter matrices all leave the tensor cores idle waiting on
+# memory. These are conservative; `dllm train estimate --calibrate` replaces
+# them with a measured number.
+#
+# `usd_per_hour` is indicative on-demand spot-ish pricing and moves constantly.
+# Treat it as an order of magnitude and check your provider before renting.
+
+gpus:
+  - name: RTX 4060 8GB
+    vram_gb: 8
+    bf16_tflops_dense: 30
+    mfu: 0.16
+    usd_per_hour: 0.0        # the card you already own
+    note: Local. Fits 1.5B LoRA in bf16; 7B needs 4-bit and is slow.
+
+  - name: RTX 4090 24GB
+    vram_gb: 24
+    bf16_tflops_dense: 165
+    mfu: 0.22
+    usd_per_hour: 0.40
+    note: Best value for a 1.5-7B LoRA if you can find one.
+
+  - name: L4 24GB
+    vram_gb: 24
+    bf16_tflops_dense: 60
+    mfu: 0.24
+    usd_per_hour: 0.75
+    note: Cheap and widely available; slower than a 4090.
+
+  - name: A10G 24GB
+    vram_gb: 24
+    bf16_tflops_dense: 62
+    mfu: 0.25
+    usd_per_hour: 1.00
+    note: Common on AWS g5 instances.
+
+  - name: L40S 48GB
+    vram_gb: 48
+    bf16_tflops_dense: 181
+    mfu: 0.30
+    usd_per_hour: 1.40
+    note: Comfortable for a 7B LoRA without quantisation.
+
+  - name: A100 40GB
+    vram_gb: 40
+    bf16_tflops_dense: 312
+    mfu: 0.32
+    usd_per_hour: 1.60
+    note: The reference datacentre card.
+
+  - name: H100 80GB
+    vram_gb: 80
+    bf16_tflops_dense: 495
+    mfu: 0.35
+    usd_per_hour: 3.00
+    note: Overkill for a 1.5B LoRA; you pay for memory bandwidth you cannot use.

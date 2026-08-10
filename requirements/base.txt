@@ -1,0 +1,9 @@
+# Core pipeline: config, data prep, eval harness, scoring. No GPU, no torch.
+pydantic==2.13.4
+pydantic-settings==2.14.2
+PyYAML==6.0.3
+sqlglot==30.15.0
+numpy==2.2.6
+rich==14.2.0
+typer==0.20.0
+httpx==0.28.1

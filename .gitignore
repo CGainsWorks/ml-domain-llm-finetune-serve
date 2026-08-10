@@ -1,0 +1,52 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Environment / secrets
+.env
+.env.*
+!.env.example
+*.key
+gateway_keys.json
+
+# Model + data artefacts (large, reproducible from scripts)
+artifacts/
+data/raw/
+data/interim/
+data/processed/
+checkpoints/
+outputs/
+merged/
+*.safetensors
+*.bin
+*.gguf
+*.pt
+*.pth
+
+# MLflow local backing store
+mlruns/
+mlartifacts/
+mlflow.db
+
+# Eval + bench working dirs (committed results live in evals/results/ and docs/)
+.eval_cache/
+bench_raw/
+
+# HF cache when pointed inside the repo
+.hf_cache/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

@@ -1,0 +1,5 @@
+# Inference server. Linux + CUDA only -- vLLM publishes no Windows wheel.
+# Run this inside serving/vllm/Dockerfile or on the rented GPU box.
+-r serve.txt
+
+vllm==0.26.0

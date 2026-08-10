@@ -1,0 +1,25 @@
+# Normalise line endings so CI on Linux and dev on Windows agree.
+* text=auto eol=lf
+*.ps1 text eol=crlf
+*.bat text eol=crlf
+
+# --- Git LFS ---------------------------------------------------------------
+# Model weights and other large binaries must never enter the plain Git
+# history. Anything matched here is LFS-tracked; anything large that is NOT
+# matched here should go to a GitHub Release instead.
+*.safetensors  filter=lfs diff=lfs merge=lfs -text
+*.bin          filter=lfs diff=lfs merge=lfs -text
+*.pt           filter=lfs diff=lfs merge=lfs -text
+*.pth          filter=lfs diff=lfs merge=lfs -text
+*.gguf         filter=lfs diff=lfs merge=lfs -text
+*.onnx         filter=lfs diff=lfs merge=lfs -text
+*.npz          filter=lfs diff=lfs merge=lfs -text
+*.tar.gz       filter=lfs diff=lfs merge=lfs -text
+
+# Media used in the README
+*.gif          filter=lfs diff=lfs merge=lfs -text
+*.mp4          filter=lfs diff=lfs merge=lfs -text
+
+# Eval scorecards and benchmark JSON are small and must stay diffable.
+evals/results/**   -filter -diff -merge text
+docs/**            -filter -diff -merge text

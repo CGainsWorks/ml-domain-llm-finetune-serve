@@ -1,0 +1,37 @@
+# Profile for a single 8 GB consumer card (RTX 4060 / 3060 Ti / 2070 Super).
+#
+# Identical to base.yaml apart from the memory-driven settings. Kept as its own
+# file so `base.yaml` can stay the readable reference and this can carry the
+# reasoning about why each number is what it is.
+#
+# Memory budget at bf16, 1.5B params, training length 512:
+#   weights            ~3.1 GB
+#   LoRA params+grads  ~0.1 GB
+#   optimiser (8-bit)  ~0.1 GB
+#   activations        ~1.2 GB at batch 8 x ~150 real tokens with checkpointing
+#   fragmentation/CUDA ~1.0 GB
+#   -------------------------
+#   ~5.5 GB of 8 GB, leaving headroom for the periodic in-loop eval.
+#
+# Sequences are short (p95 150 tokens) and padding is dynamic, so batch 8 costs
+# far less memory here than the nominal 512 length suggests.
+
+_base_: base.yaml
+
+train:
+  run_name: sql-lora-1p5b-8gb
+  max_length: 512
+  per_device_batch_size: 8
+  grad_accum_steps: 2
+  gradient_checkpointing: true   # ~30% slower, roughly halves activation memory
+  optim: paged_adamw_8bit        # pages optimiser state to host RAM on spikes
+
+eval:
+  backend:
+    batch_size: 8                # 16+ can OOM during the in-loop eval
+
+serve:
+  vllm:
+    max_model_len: 2048
+    max_num_seqs: 32
+    gpu_memory_utilization: 0.80

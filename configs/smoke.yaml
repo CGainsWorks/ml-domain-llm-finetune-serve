@@ -1,0 +1,47 @@
+# Tiny end-to-end profile. Runs on CPU in a couple of minutes and is what CI
+# uses to prove the pipeline is wired together. The numbers it produces are
+# meaningless as evaluation -- 32 items and 8 training steps -- and it must
+# never be used to gate a deployment.
+
+_base_: base.yaml
+
+model:
+  # ~0.5M params, no licence friction, downloads in seconds. Its SQL is
+  # nonsense, which is the point: CI checks the plumbing, not the model.
+  id: hf-internal-testing/tiny-random-LlamaForCausalLM
+  revision: main
+  licence: Apache-2.0
+  commercial_use: true
+  max_seq_len: 256
+
+data:
+  max_train_examples: 64
+  max_eval_examples: 32
+
+train:
+  run_name: smoke
+  epochs: 1.0
+  max_steps: 8
+  per_device_batch_size: 1
+  grad_accum_steps: 1
+  save_steps: 4
+  eval_steps: 4
+  logging_steps: 1
+  bf16: false
+  gradient_checkpointing: false
+  optim: adamw_torch
+
+eval:
+  limit: 32
+  generation:
+    max_new_tokens: 24
+  backend:
+    kind: hf
+    device: cpu
+    batch_size: 4
+  # No thresholds: a random-weight model cannot pass a gate, and pretending
+  # otherwise would make the gate meaningless.
+  thresholds:
+    min_absolute: {}
+    min_delta_vs_baseline: {}
+    max_regression: {}

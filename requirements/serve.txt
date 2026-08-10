@@ -1,0 +1,10 @@
+-r base.txt
+
+fastapi==0.141.1
+uvicorn[standard]==0.52.1
+openai==2.53.0
+prometheus-client==0.24.1
+
+# No slowapi: it rate-limits per client IP by request count only. This gateway
+# needs per-API-key limits on requests *and* on tokens, so the buckets are
+# implemented directly in dllm.serve.gateway.ratelimit.

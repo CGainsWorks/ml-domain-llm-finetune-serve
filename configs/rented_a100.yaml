@@ -1,0 +1,51 @@
+# Profile for a rented 40-80 GB card (A100, H100, L40S, A6000).
+#
+# Differences from the 8 GB profile: a bigger base model, no gradient
+# checkpointing (there is memory to spare and it costs ~30% throughput), a
+# larger micro-batch, and longer sequences. Effective batch is held at 16 so
+# the learning rate carries over from the 8 GB profile unchanged.
+#
+# See docs/GPU_HOURS.md before renting.
+
+_base_: base.yaml
+
+model:
+  id: Qwen/Qwen2.5-Coder-7B-Instruct
+  revision: c03e6d358207e414f1eca0bb1891e29f1db0e242
+  licence: Apache-2.0
+  licence_url: https://www.apache.org/licenses/LICENSE-2.0
+  commercial_use: true
+  max_seq_len: 1536
+  attn_implementation: flash_attention_2
+
+lora:
+  r: 32
+  alpha: 64
+
+data:
+  max_train_examples: 40000
+
+train:
+  run_name: sql-lora-7b
+  max_length: 768
+  # batch 32 in one device step needs ~44 GB and does not fit an A100 40GB.
+  # 16 x 2 keeps the effective batch at 32 and fits in ~31 GB.
+  # Check with: dllm train estimate -c configs/rented_a100.yaml
+  per_device_batch_size: 16
+  grad_accum_steps: 2        # effective batch 32
+  lr: 2.5e-4                 # scaled with the larger effective batch
+  gradient_checkpointing: false
+  optim: adamw_torch_fused
+  save_steps: 100
+  eval_steps: 200
+
+eval:
+  backend:
+    kind: hf
+    batch_size: 32
+
+serve:
+  vllm:
+    max_model_len: 4096
+    max_num_seqs: 256
+    gpu_memory_utilization: 0.90
