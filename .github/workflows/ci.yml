@@ -98,6 +98,19 @@ jobs:
           pip install -r requirements/train.txt -r requirements/serve.txt -r requirements/dev.txt
           pip install -e . --no-deps
 
+      # Cache the Hugging Face downloads. Without this every push re-fetches the
+      # dataset and the tiny test model, and Hugging Face rate-limits shared CI
+      # egress: a run failed with HTTP 429 on the dataset, which is an external
+      # flake but one we were causing by asking for the same files every time.
+      # Keyed on the pinned revisions, so a source change invalidates it.
+      - name: Cache Hugging Face downloads
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface
+          key: hf-${{ runner.os }}-${{ hashFiles('src/dllm/data/sources.py', 'configs/smoke.yaml') }}
+          restore-keys: |
+            hf-${{ runner.os }}-
+
       # audit -> prepare -> baseline -> train -> merge -> eval -> gate,
       # with a tiny random-weight model. Proves the stages connect, and
       # asserts that the gate BLOCKS the resulting garbage model.

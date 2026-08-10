@@ -37,17 +37,36 @@ echo "smoke docs directory: $DLLM_DOCS_DIR"
 
 step() { echo ""; echo "=== $* ==="; }
 
+# Retry a command a few times with backoff. Used only for steps that reach the
+# network: Hugging Face rate-limits shared CI egress and returns 429, which is
+# not a defect in this pipeline and should not fail a build. Anything that does
+# not touch the network is run once, so a genuine bug still fails immediately.
+retry() {
+  local max=4 n=1 delay=10
+  until "$@"; do
+    if [ "$n" -ge "$max" ]; then
+      echo "!! '$*' failed after $max attempts" >&2
+      return 1
+    fi
+    echo ">> attempt $n failed; retrying in ${delay}s (network step)" >&2
+    sleep "$delay"
+    n=$((n + 1))
+    delay=$((delay * 2))
+  done
+}
+
 step "1/7 licence audit"
 $DLLM data audit --config "$CONFIG"
 
 step "2/7 dataset preparation"
-$DLLM data prepare --config "$CONFIG"
+retry $DLLM data prepare --config "$CONFIG"
 
 step "3/7 dataset card"
 $DLLM data card --config "$CONFIG"
 
 step "4/7 baseline eval (before any training)"
-$DLLM eval run --config "$CONFIG" --label smoke-baseline
+# First contact with the model repo, so this one can be rate-limited too.
+retry $DLLM eval run --config "$CONFIG" --label smoke-baseline
 
 step "5/7 LoRA training (8 steps)"
 $DLLM train run --config "$CONFIG"
