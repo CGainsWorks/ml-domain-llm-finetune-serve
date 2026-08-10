@@ -1,0 +1,101 @@
+name: eval-gate
+
+# The gate, as a reusable workflow. `deploy.yml` calls it and refuses to
+# proceed unless it succeeds. It is deliberately the only place that decides
+# whether a model may ship, so there is exactly one answer to "was this model
+# evaluated?" rather than one per pipeline.
+
+on:
+  workflow_call:
+    inputs:
+      candidate:
+        description: Path to the candidate scorecard JSON.
+        required: true
+        type: string
+      baseline:
+        description: Path to the baseline scorecard JSON.
+        required: false
+        default: evals/results/baseline.json
+        type: string
+      config:
+        required: false
+        default: configs/base.yaml
+        type: string
+    outputs:
+      promote:
+        description: "'true' only if every threshold passed."
+        value: ${{ jobs.gate.outputs.promote }}
+  workflow_dispatch:
+    inputs:
+      candidate:
+        required: true
+        type: string
+      baseline:
+        required: false
+        default: evals/results/baseline.json
+        type: string
+      config:
+        required: false
+        default: configs/base.yaml
+        type: string
+
+jobs:
+  gate:
+    name: apply promotion gate
+    runs-on: ubuntu-latest
+    outputs:
+      promote: ${{ steps.decide.outputs.promote }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - run: |
+          pip install -r requirements/base.txt
+          pip install -e . --no-deps
+
+      - name: Baseline scorecard must exist
+        run: |
+          if [ ! -f "${{ inputs.baseline }}" ]; then
+            echo "::error::no baseline scorecard at ${{ inputs.baseline }}."
+            echo "::error::Without a before-number the after-number means nothing."
+            exit 1
+          fi
+
+      - name: Candidate scorecard must exist
+        run: |
+          if [ ! -f "${{ inputs.candidate }}" ]; then
+            echo "::error::no candidate scorecard at ${{ inputs.candidate }}"
+            exit 1
+          fi
+
+      - name: Apply the gate
+        id: decide
+        run: |
+          set +e
+          python -m dllm.cli eval gate \
+            --config "${{ inputs.config }}" \
+            --candidate "${{ inputs.candidate }}" \
+            --baseline "${{ inputs.baseline }}" \
+            --report gate_report.md
+          rc=$?
+          set -e
+          if [ $rc -eq 0 ]; then
+            echo "promote=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "promote=false" >> "$GITHUB_OUTPUT"
+          fi
+          exit $rc
+
+      - name: Publish the gate report
+        if: always()
+        run: cat gate_report.md >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gate-report
+          path: gate_report.md

@@ -1,0 +1,174 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHONUNBUFFERED: "1"
+
+jobs:
+  lint-and-test:
+    name: lint + unit tests
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.10", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+
+      # base + dev only. No torch, no CUDA: the eval harness, the scoring maths
+      # and the promotion gate are all pure Python and must stay that way, so
+      # this job runs in well under a minute.
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements/base.txt -r requirements/dev.txt
+          pip install -e . --no-deps
+
+      - name: Lint
+        run: |
+          ruff check src tests
+          ruff format --check src tests
+
+      - name: Unit tests
+        run: pytest tests -q --junitxml=test-results.xml
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-results-py${{ matrix.python }}
+          path: test-results.xml
+
+  licence-audit:
+    name: licence audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: |
+          pip install -r requirements/base.txt
+          pip install -e . --no-deps
+
+      # Blocks the build on a non-commercial or undeclared dataset licence.
+      # Downloads nothing: it reads the declared registry metadata.
+      - name: Audit dataset licences
+        run: python -m dllm.cli data audit --config configs/base.yaml
+
+      - name: Fail if the audit report is stale
+        run: |
+          if ! git diff --quiet -- docs/LICENCE_AUDIT.md; then
+            echo "::error::docs/LICENCE_AUDIT.md is out of date. Run 'make audit' and commit."
+            git diff -- docs/LICENCE_AUDIT.md
+            exit 1
+          fi
+
+  smoke:
+    name: end-to-end smoke (CPU)
+    runs-on: ubuntu-latest
+    needs: [lint-and-test]
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install (CPU torch)
+        run: |
+          python -m pip install --upgrade pip
+          pip install --index-url https://download.pytorch.org/whl/cpu torch==2.13.0
+          pip install -r requirements/train.txt -r requirements/serve.txt -r requirements/dev.txt
+          pip install -e . --no-deps
+
+      # audit -> prepare -> baseline -> train -> merge -> eval -> gate,
+      # with a tiny random-weight model. Proves the stages connect, and
+      # asserts that the gate BLOCKS the resulting garbage model.
+      - name: Run the pipeline end to end
+        run: bash scripts/run_smoke.sh
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: smoke-artifacts
+          path: |
+            evals/results/smoke-*.json
+            artifacts/smoke_results.md
+            artifacts/smoke_gate.md
+
+  docker:
+    name: build images
+    runs-on: ubuntu-latest
+    needs: [lint-and-test]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+
+      # Only the gateway is built here. The vLLM image is a 10+ GB CUDA base
+      # that a standard runner cannot pull inside the time limit; it is built
+      # in the deploy workflow on a GPU runner.
+      - name: Build gateway image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: serving/gateway/Dockerfile
+          push: false
+          load: true
+          tags: dllm-gateway:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Gateway starts and refuses unauthenticated requests
+        run: |
+          docker run -d --name gw -p 8080:8080 dllm-gateway:ci
+          for _ in $(seq 1 30); do
+            curl -fsS http://localhost:8080/healthz && break
+            sleep 2
+          done
+          curl -fsS http://localhost:8080/healthz
+
+          # No keys configured -> must refuse, not serve.
+          code=$(curl -s -o /dev/null -w '%{http_code}' -X POST \
+            http://localhost:8080/v1/chat/completions \
+            -H 'Content-Type: application/json' \
+            -d '{"model":"domain-sql","messages":[{"role":"user","content":"hi"}]}')
+          echo "unauthenticated request returned $code"
+          if [ "$code" = "200" ]; then
+            echo "::error::gateway served an unauthenticated request"
+            docker logs gw
+            exit 1
+          fi
+          docker rm -f gw
+
+  validate-configs:
+    name: configs and task definitions
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: |
+          pip install -r requirements/base.txt -r requirements/dev.txt
+          pip install -e . --no-deps
+
+      # Catches a typo'd YAML key now rather than 40 minutes into a rented hour.
+      - name: Every shipped config validates
+        run: pytest tests/test_config.py tests/test_tasks_and_scorecard.py -q
