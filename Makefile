@@ -68,8 +68,9 @@ train:  ## LoRA fine-tune. Re-run the same command to resume after a crash.
 	$(DLLM) train run --config $(CONFIG)
 
 merge:  ## Merge the adapter into the base weights
-	$(DLLM) model merge --config $(CONFIG) \
-	  --adapter artifacts/checkpoints/$$($(PYTHON) -c "import yaml;print(yaml.safe_load(open('$(CONFIG)')).get('train',{}).get('run_name','sql-lora-1p5b'))")/adapter
+	# No --adapter: the CLI derives it from the config, which resolves _base_
+	# includes properly. Re-parsing the YAML here did not.
+	$(DLLM) model merge --config $(CONFIG)
 
 eval:  ## Evaluate the fine-tuned model
 	$(DLLM) eval run --config $(CONFIG) --label $(LABEL) --model-path artifacts/merged/current

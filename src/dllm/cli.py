@@ -268,7 +268,9 @@ def train_estimate(
 def model_merge(
     config: str = ConfigOpt,
     set_: list[str] = SetOpt,
-    adapter: str = typer.Option(..., help="LoRA adapter directory."),
+    adapter: str = typer.Option(
+        None, help="LoRA adapter directory. Defaults to the config's own output directory."
+    ),
     out: str = typer.Option("artifacts/merged/current", help="Output directory."),
     verify: bool = typer.Option(True, help="Check merged outputs match adapter-on-base."),
 ) -> None:
@@ -276,6 +278,13 @@ def model_merge(
     from dllm.merge.merge_adapter import merge_and_export
 
     cfg = load_config(config, set_)
+    # Default the adapter path from the config rather than making the caller
+    # reconstruct it. The Makefile previously did this by re-parsing the YAML in
+    # a shell substitution, which silently ignored `_base_` includes and would
+    # have picked the wrong run_name for any config that inherits it.
+    if adapter is None:
+        adapter = str(ROOT / cfg.resolved_output_dir() / "adapter")
+        typer.echo(f"no --adapter given; using {adapter}")
     info = merge_and_export(cfg, adapter_path=adapter, out_dir=out, verify=verify)
     typer.echo(json.dumps(info, indent=2, default=str))
 
