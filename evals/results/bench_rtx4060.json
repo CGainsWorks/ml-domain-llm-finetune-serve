@@ -1,0 +1,224 @@
+{
+  "created_at": "2026-08-10T12:07:59+00:00",
+  "endpoint": "http://localhost:8080/v1",
+  "model": "domain-sql",
+  "streaming": true,
+  "max_tokens": 128,
+  "requests_per_level": 48,
+  "levels": [
+    {
+      "concurrency": 1,
+      "requests": 48,
+      "successes": 48,
+      "failures": 0,
+      "duration_s": 17.183,
+      "requests_per_s": 2.793,
+      "output_tokens_per_s": 68.85,
+      "rate_limited": 0,
+      "e2e_ms": {
+        "mean": 357.93,
+        "p50": 358.38,
+        "p90": 473.11,
+        "p95": 489.64,
+        "p99": 668.95,
+        "max": 668.95
+      },
+      "ttft_ms": {
+        "mean": 30.3,
+        "p50": 29.85,
+        "p90": 32.67,
+        "p95": 34.01,
+        "p99": 35.59,
+        "max": 35.59
+      },
+      "itl_ms": {
+        "mean": 13.91,
+        "p50": 13.82,
+        "p90": 14.68,
+        "p95": 14.95,
+        "p99": 16.04,
+        "max": 16.04
+      }
+    },
+    {
+      "concurrency": 2,
+      "requests": 48,
+      "successes": 48,
+      "failures": 0,
+      "duration_s": 8.867,
+      "requests_per_s": 5.413,
+      "output_tokens_per_s": 133.41,
+      "rate_limited": 0,
+      "e2e_ms": {
+        "mean": 369.08,
+        "p50": 356.59,
+        "p90": 478.25,
+        "p95": 505.22,
+        "p99": 714.69,
+        "max": 714.69
+      },
+      "ttft_ms": {
+        "mean": 39.22,
+        "p50": 39.14,
+        "p90": 41.85,
+        "p95": 44.01,
+        "p99": 51.62,
+        "max": 51.62
+      },
+      "itl_ms": {
+        "mean": 14.0,
+        "p50": 13.85,
+        "p90": 14.68,
+        "p95": 14.9,
+        "p99": 15.55,
+        "max": 15.55
+      }
+    },
+    {
+      "concurrency": 4,
+      "requests": 48,
+      "successes": 48,
+      "failures": 0,
+      "duration_s": 4.694,
+      "requests_per_s": 10.227,
+      "output_tokens_per_s": 252.05,
+      "rate_limited": 0,
+      "e2e_ms": {
+        "mean": 382.33,
+        "p50": 383.35,
+        "p90": 492.84,
+        "p95": 519.58,
+        "p99": 689.5,
+        "max": 689.5
+      },
+      "ttft_ms": {
+        "mean": 42.99,
+        "p50": 40.75,
+        "p90": 54.39,
+        "p95": 55.6,
+        "p99": 59.09,
+        "max": 59.09
+      },
+      "itl_ms": {
+        "mean": 14.42,
+        "p50": 14.28,
+        "p90": 15.43,
+        "p95": 15.67,
+        "p99": 16.02,
+        "max": 16.02
+      }
+    },
+    {
+      "concurrency": 8,
+      "requests": 48,
+      "successes": 48,
+      "failures": 0,
+      "duration_s": 2.406,
+      "requests_per_s": 19.953,
+      "output_tokens_per_s": 491.75,
+      "rate_limited": 0,
+      "e2e_ms": {
+        "mean": 379.78,
+        "p50": 375.31,
+        "p90": 478.23,
+        "p95": 506.02,
+        "p99": 692.37,
+        "max": 692.37
+      },
+      "ttft_ms": {
+        "mean": 46.3,
+        "p50": 41.13,
+        "p90": 65.78,
+        "p95": 67.01,
+        "p99": 67.09,
+        "max": 67.09
+      },
+      "itl_ms": {
+        "mean": 14.16,
+        "p50": 14.11,
+        "p90": 14.38,
+        "p95": 14.44,
+        "p99": 15.31,
+        "max": 15.31
+      }
+    },
+    {
+      "concurrency": 16,
+      "requests": 48,
+      "successes": 48,
+      "failures": 0,
+      "duration_s": 1.431,
+      "requests_per_s": 33.552,
+      "output_tokens_per_s": 826.92,
+      "rate_limited": 0,
+      "e2e_ms": {
+        "mean": 405.77,
+        "p50": 410.78,
+        "p90": 509.26,
+        "p95": 558.32,
+        "p99": 706.07,
+        "max": 706.07
+      },
+      "ttft_ms": {
+        "mean": 59.84,
+        "p50": 54.27,
+        "p90": 89.6,
+        "p95": 89.98,
+        "p99": 91.46,
+        "max": 91.46
+      },
+      "itl_ms": {
+        "mean": 14.69,
+        "p50": 14.75,
+        "p90": 15.25,
+        "p95": 15.32,
+        "p99": 16.11,
+        "max": 16.11
+      }
+    },
+    {
+      "concurrency": 32,
+      "requests": 48,
+      "successes": 48,
+      "failures": 0,
+      "duration_s": 0.973,
+      "requests_per_s": 49.339,
+      "output_tokens_per_s": 1199.56,
+      "rate_limited": 0,
+      "e2e_ms": {
+        "mean": 486.58,
+        "p50": 487.22,
+        "p90": 626.47,
+        "p95": 690.2,
+        "p99": 888.87,
+        "max": 888.87
+      },
+      "ttft_ms": {
+        "mean": 129.85,
+        "p50": 118.08,
+        "p90": 212.41,
+        "p95": 213.56,
+        "p99": 216.34,
+        "max": 216.34
+      },
+      "itl_ms": {
+        "mean": 15.4,
+        "p50": 15.4,
+        "p90": 16.23,
+        "p95": 16.31,
+        "p99": 16.77,
+        "max": 16.77
+      }
+    }
+  ],
+  "summary": {
+    "peak_output_tokens_per_s": 1199.56,
+    "peak_at_concurrency": 32,
+    "p50_latency_ms_at_peak": 487.22,
+    "p95_latency_ms_at_peak": 690.2,
+    "ttft_p50_ms_at_peak": 118.08,
+    "total_failures": 0,
+    "total_rate_limited": 0,
+    "valid": true
+  }
+}

@@ -21,13 +21,25 @@ Last updated: 2026-08-10
 | **End-to-end smoke** | `scripts/run_smoke.sh` runs all 7 stages and asserts the gate blocks the resulting model. Passes locally **and on a clean GitHub Actions runner**. |
 | **CI** | All 6 jobs green on Ubuntu: lint + tests on 3.10 and 3.12, licence audit, config validation, image build, end-to-end smoke. |
 
+## Complete
+
+The pipeline has been run end to end on an RTX 4060: trained, merged,
+evaluated, gated, registered, served and benchmarked.
+
+- **exec_acc_nonempty 0.7865 → 0.8932** (+0.1068) on 500 held-out items.
+- **Gate: PROMOTE.** Registered as `domain-sql` v1, `deployment_target` moved.
+- **Training: 1.149 GPU-hours measured**, against a 1.19 h calibration.
+- **Serving: 1,199.6 output tokens/s peak** at concurrency 32, zero failures,
+  real vLLM 0.26.0 behind the gateway.
+
+Numbers and their caveats: [docs/results.md](docs/results.md).
+
 ## Not done
 
-- **No benchmark numbers yet.** The harness is tested against a stub but has not
-  been pointed at a served model, so `docs/results.md` §4 says `NOT YET RUN`.
-  This is now unblocked rather than impossible — see below.
 - `.github/workflows/train.yml` needs a self-hosted GPU runner and has not been
   executed on one.
+- The 7B profile (`configs/rented_a100.yaml`) has never been trained. It does
+  not fit 8 GB and needs the rented card the brief anticipated.
 
 ### vLLM on Windows: it does run
 
@@ -77,6 +89,21 @@ against it. They are listed because the list is the argument for doing so.
    0.16 assumed, so the projection went from 2.58 h to 1.18 h.
 9. **The heartbeat ETA was 2.4x wrong early in a run**, because the rate was
    cumulative and included model loading.
+10. **`make merge` would have merged the wrong adapter.** The Makefile rebuilt
+    the checkpoint path with a shell `yaml.safe_load` that skips `_base_`
+    resolution.
+11. **The merge check rejected a numerically exact fine-tune.** It compared
+    decoded greedy text, which is chaotic in the logits. Its replacement then
+    compared fp32 against bf16 and blamed the merge for the cast. Merge fidelity
+    and export precision are now measured separately: 1.000000 and 0.962025.
+12. **vLLM would not start under WSL2** — `RuntimeError: UVA is not available`,
+    which names neither WSL2 nor the cause. vLLM disables pinned host memory on
+    WSL2 by default and its UVA probe is just `is_pin_memory_available()`.
+    `VLLM_WSL2_ENABLE_PIN_MEMORY=1` fixes it.
+13. **The first benchmark rate-limited itself**, reporting 273/288 failures with
+    healthy latencies. They were 429s from our own gateway at its 60 rpm
+    default. The harness now counts them separately and refuses to mark such a
+    run valid.
 
 ## Next steps
 

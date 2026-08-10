@@ -30,6 +30,19 @@ services:
       MAX_NUM_SEQS: ${MAX_NUM_SEQS:-64}
       DTYPE: ${DTYPE:-bfloat16}
       HF_HOME: /root/.cache/huggingface
+      # Required under Docker Desktop / WSL2, harmless elsewhere.
+      #
+      # vLLM disables pinned host memory on WSL2 by default. Its UVA probe is
+      # just `is_pin_memory_available()`, so with pinning off UVA reports
+      # unavailable, and the V2 GPU model runner -- which allocates UvaBuffers
+      # -- dies at init with a bare "RuntimeError: UVA is not available" that
+      # names neither WSL2 nor pinned memory.
+      #
+      # Setting this re-enables pinning and the stack starts normally. If your
+      # WSL2 setup genuinely cannot pin host memory, fall back to the V1 model
+      # runner instead, which does not use UvaBuffer:
+      #   VLLM_USE_V2_MODEL_RUNNER: "0"
+      VLLM_WSL2_ENABLE_PIN_MEMORY: ${VLLM_WSL2_ENABLE_PIN_MEMORY:-1}
     volumes:
       - ./artifacts/merged/current:/models/current:ro
       - hf-cache:/root/.cache/huggingface

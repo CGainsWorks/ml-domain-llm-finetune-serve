@@ -1,74 +1,108 @@
 # Results
 
-Every number here is reproducible from a script in this repository. Where a
-number does not exist yet, this file says so rather than estimating one.
+Every number here was measured, on the hardware named, by a script in this
+repository. Nothing is estimated unless it says so.
+
+**Headline: execution accuracy went from 0.7865 to 0.8932 (+0.1068) on a
+500-item holdout, with no regression on the catastrophic-forgetting guard. The
+model passed the promotion gate and was registered.**
 
 ---
 
-## 1. Baseline — measured
-
-Base model, no fine-tuning.
+## 1. Base vs fine-tuned
 
 ```bash
-make baseline     # → evals/results/baseline.json
+make baseline    # → evals/results/baseline.json
+make train && make merge
+make eval        # → evals/results/finetuned.json
+make compare
 ```
 
-| | |
-|---|---|
-| Model | `Qwen/Qwen2.5-1.5B-Instruct` @ `989aa798` |
-| Hardware | 1 × RTX 4060 (8 GB), bf16 |
-| Decoding | greedy (`temperature=0`), `max_new_tokens=160` |
-| Prompt version | `sql_v1` |
-| Items | 500 held-out SQL (459 with non-empty gold) + 200 guard |
-| Wall clock | 2,194 s |
+| | Base | Fine-tuned |
+|---|---|---|
+| Model | `Qwen/Qwen2.5-1.5B-Instruct` @ `989aa798` | + LoRA r=16, merged |
+| Hardware | 1 × RTX 4060 (8 GB), bf16 | same |
+| Decoding | greedy, `max_new_tokens=160` | same |
+| Prompt version | `sql_v1` | `sql_v1` |
+| Eval wall clock | 1,690 s | 411 s |
 
-### `sql_exec_holdout`
+### `sql_exec_holdout` — 500 held-out items, 459 with non-empty gold
 
-| Metric | Value |
-|---|---:|
-| **`exec_acc_nonempty`** (gate metric) | **0.7865** |
-| `exec_acc` | 0.7860 |
-| `schema_adherence` | 0.9880 |
-| `valid_sql_rate` | 0.9980 |
-| `exact_match_norm` | 0.5960 |
-| `exec_error_rate` | 0.0120 |
-| `unparseable_rate` | 0.0020 |
+| Metric | Base | Fine-tuned | Δ | |
+|---|---:|---:|---:|:--:|
+| **`exec_acc_nonempty`** (gate metric) | 0.7865 | **0.8932** | **+0.1068** | ▲ |
+| `exec_acc` | 0.7860 | 0.8940 | +0.1080 | ▲ |
+| `exact_match_norm` | 0.5960 | 0.7960 | +0.2000 | ▲ |
+| `schema_adherence` | 0.9880 | 0.9960 | +0.0080 | ▲ |
+| `valid_sql_rate` | 0.9980 | 0.9960 | −0.0020 | ▼ |
+| `exec_error_rate` | 0.0120 | 0.0060 | −0.0060 | ▲ |
+| `unparseable_rate` | 0.0020 | 0.0040 | +0.0020 | ▼ |
 
-### `general_guard`
+Raw counts: correct 319 → **447**, wrong 174 → **48**, exec errors 6 → 3.
+Zero items had an unexecutable gold query in either run, so the denominators are
+identical and the comparison is like-for-like.
 
-| Metric | Value |
-|---|---:|
-| `answers_in_prose` | 0.9950 |
-| `non_empty_rate` | 1.0000 |
-| `mean_chars` | ~225 |
-| `keyword_overlap` | 0.297 |
+### `general_guard` — 200 general questions, never trained on
+
+| Metric | Base | Fine-tuned | Δ | |
+|---|---:|---:|---:|:--:|
+| **`answers_in_prose`** (guard metric) | 0.9950 | 0.9950 | +0.0000 | = |
+| `non_empty_rate` | 1.0000 | 1.0000 | +0.0000 | = |
+| `mean_chars` | 232.94 | 214.00 | −18.94 | ▼ |
+| `keyword_overlap` | 0.2997 | 0.2946 | −0.0051 | ▼ |
+
+**No catastrophic forgetting.** Exactly one of 200 general questions was
+answered with SQL, before and after. Answers got about 8% shorter, which is the
+expected pull of a terse-output fine-tune and nowhere near the collapse the
+guard exists to catch.
 
 ### Reading it
 
-**Execution accuracy exceeds exact match by 19 points** (0.786 vs 0.596). Nearly
-a fifth of correct answers are written differently from the gold query. Any
-evaluation of this task by string comparison under-reports by roughly that much,
-which is why `exact_match_norm` is reported but never gated on.
+**The gain is real, not a formatting artefact.** `exact_match_norm` rose more
+than `exec_acc` (+0.20 vs +0.11), which is what learning the dataset's
+conventions looks like — but execution accuracy rose independently, and that
+metric does not care how a query is written. See §3 for why this distinction
+was nearly lost.
 
-**The base model is already competent.** 78.65% is a high bar, and it is the
-right one — a gate calibrated against a weak baseline flatters everything that
-follows. The `+0.05` improvement threshold means a fine-tune must reach 0.8365.
+**Errors were already syntactic-clean before tuning and stayed that way.**
+99.8% → 99.6% valid SQL. The headroom was never in producing parseable SQL; it
+was in choosing the right filter, aggregate or column, and that is what moved.
 
-**Errors are concentrated in semantics, not syntax.** 99.8% of predictions parse
-and 98.8% reference only real columns, but 21% return the wrong rows. This is not
-a model that cannot write SQL; it is a model that sometimes writes the wrong
-query. That shape suggests fine-tuning should help — most of the headroom is in
-choosing the right aggregate, filter or column, which is exactly what in-domain
-supervision teaches.
+**Fine-tuning made inference 4× faster on the same hardware** (1,690 s → 411 s
+for the same 700 items). The tuned model stops at the answer instead of
+continuing into explanation, so it hits the stop strings far sooner. That is a
+serving-cost result as much as an accuracy one.
 
 ---
 
-## 2. A measurement artefact worth 15.7 points
+## 2. Promotion gate
+
+```bash
+make gate     # exit 0
+```
+
+**Decision: PROMOTE.** All six checks passed.
+
+| | Check | Metric | Threshold | Baseline | Observed |
+|:--:|---|---|---:|---:|---:|
+| ✅ | min_absolute | `general_guard.non_empty_rate` | ≥ 0.9800 | — | 1.0000 |
+| ✅ | min_absolute | `sql_exec_holdout.schema_adherence` | ≥ 0.9500 | — | 0.9960 |
+| ✅ | min_absolute | `sql_exec_holdout.valid_sql_rate` | ≥ 0.9800 | — | 0.9960 |
+| ✅ | min_delta | `sql_exec_holdout.exec_acc_nonempty` | ≥ +0.0500 | 0.7865 | 0.8932 |
+| ✅ | max_regression | `general_guard.answers_in_prose` | ≤ 0.1000 drop | 0.9950 | 0.9950 |
+| ✅ | max_regression | `sql_exec_holdout.valid_sql_rate` | ≤ 0.0100 drop | 0.9980 | 0.9960 |
+
+Registered as `domain-sql` version 1; `Staging` and `deployment_target` both
+moved to it. The same command run against a non-improving candidate exits 1,
+tags the version `blocked`, and leaves `deployment_target` where it was.
+
+---
+
+## 3. A measurement artefact worth 15.7 points
 
 Recorded because it changes how the rest of this file should be read.
 
-The first baseline run scored **0.6296**. Inspecting the failures showed a
-pattern:
+The first baseline scored **0.6296**. Inspecting the failures showed a pattern:
 
 | Question | Gold | Prediction | Scored |
 |---|---|---|---|
@@ -76,102 +110,130 @@ pattern:
 | What was the competition in 2003? | `... WHERE year = 2003` | `... WHERE year = "2003"` | wrong |
 
 Neither is a SQL error. The materialiser was building tables with SQLite's
-defaults — case-sensitive text comparison and strict type affinity — against a
+defaults — case-sensitive text comparison, strict type affinity — against a
 dataset written in MySQL, whose default collation is case-insensitive and whose
-comparison between `'2003'` and `2003` succeeds. The harness was measuring
-whether the model had guessed the dataset's capitalisation convention.
+`'2003' = 2003` comparison succeeds. The harness was measuring whether the model
+had guessed the dataset's capitalisation convention.
 
 Declaring text columns `TEXT COLLATE NOCASE` and numeric columns `NUMERIC`
-reproduces MySQL's semantics. The base model then scored **0.7865**.
+reproduces MySQL semantics. The base model then scored **0.7865**.
 
-**Why this mattered more than 15 points.** Fine-tuning on this dataset would have
-taught the model to lowercase its literals, recovering most of those points
-automatically. The gate would have seen a large improvement in `exec_acc` and
-promoted the model, and the README would have claimed a fine-tuning gain that was
-mostly a formatting convention.
+**Why this mattered more than the points.** Fine-tuning teaches exactly that
+capitalisation convention. Those 15.7 points would have come back automatically,
+the gate would have seen a large `exec_acc` gain, and this file would have
+claimed a fine-tuning improvement that was mostly a formatting habit. The real
+gain, measured against a correct baseline, is +0.1068 — large, but not the
++0.26 the broken harness would have reported.
 
 Re-scoring the saved predictions with the corrected scorer took **3.5 seconds**
-(`dllm eval rescore`) rather than another 36-minute inference run. Keeping
-scoring separable from generation is what made fixing this cheap enough to
-actually do.
-
----
-
-## 3. Fine-tuned model
-
-**NOT YET RUN.** No fine-tuning run has been executed, so no fine-tuned numbers
-are claimed here.
-
-To produce this section:
-
-```bash
-make train        # LoRA; resumable
-make merge        # merge + verify against adapter-on-base
-make eval         # → evals/results/finetuned.json
-make compare      # regenerates the table below
-make gate         # exit 1 if it must not ship
-```
-
-`make compare` writes a base-vs-fine-tuned table with per-metric deltas and
-direction arrows, and appends it here.
+(`dllm eval rescore`) rather than another 28-minute inference run. Keeping
+scoring separable from generation is what made fixing this cheap enough to do.
 
 ---
 
 ## 4. Serving benchmarks
 
-**NOT YET RUN.** The benchmark harness is complete and unit-tested, but it needs
-a served model on a CUDA device, and no fine-tuned checkpoint exists yet.
-
 ```bash
 docker compose up -d --build
-make bench        # → artifacts/bench/latest.json
+make bench    # → artifacts/bench/latest.json
 ```
 
-The sweep reports, per concurrency level: requests/s, output tokens/s, TTFT
-p50/p95, end-to-end p50/p90/p95/p99, and failure count. Warm-up requests are
-discarded — the first request through a cold vLLM pays CUDA graph capture and
-would otherwise dominate the p99.
+Real vLLM 0.26.0 on the RTX 4060, behind the authenticated FastAPI gateway.
+Streaming, `max_tokens=128`, 48 requests per level, warm-up discarded.
+
+| Concurrency | req/s | out tok/s | TTFT p50 | TTFT p95 | e2e p50 | e2e p95 | e2e p99 | fail | 429 |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 1 | 2.79 | 68.8 | 30 ms | 34 ms | 358 ms | 490 ms | 669 ms | 0 | 0 |
+| 2 | 5.41 | 133.4 | 39 ms | 44 ms | 357 ms | 505 ms | 715 ms | 0 | 0 |
+| 4 | 10.23 | 252.1 | 41 ms | 56 ms | 383 ms | 520 ms | 690 ms | 0 | 0 |
+| 8 | 19.95 | 491.8 | 41 ms | 67 ms | 375 ms | 506 ms | 692 ms | 0 | 0 |
+| 16 | 33.55 | 826.9 | 54 ms | 90 ms | 411 ms | 558 ms | 706 ms | 0 | 0 |
+| 32 | 49.34 | 1,199.6 | 118 ms | 214 ms | 487 ms | 690 ms | 889 ms | 0 | 0 |
+
+**Peak: 1,199.6 output tokens/s at concurrency 32**, p50 487 ms, p95 690 ms,
+TTFT p50 118 ms.
+
+### Reading it
+
+**Throughput scales ~17× for 32× concurrency** while p50 latency rises only 36%
+(358 → 487 ms). That is continuous batching working: the card is latency-bound
+at low concurrency and only starts trading latency for throughput past 16.
+
+**TTFT is the metric that degrades**, 30 ms → 118 ms, because requests begin
+queueing for a scheduler slot. End-to-end p50 barely moves, so the cost of
+concurrency lands almost entirely on time-to-first-token — which is what a user
+perceives as responsiveness.
+
+**These are 8 GB numbers.** `gpu_memory_utilization=0.80` on a card holding a
+2.9 GB checkpoint leaves a small KV cache, capping useful concurrency. A 24 GB
+card would push the knee well past 32. Do not read these as representative of
+datacentre hardware.
+
+### The first benchmark run was invalid, and said so
+
+The initial sweep reported 273 of 288 requests failed. They were **429s from our
+own gateway**: the load generator was firing 48 requests per level against a
+60 rpm default limit, so the benchmark was measuring the rate limiter.
+
+Two fixes, both kept: `dllm serve keys` gained `--rpm` and `--tokens-per-min`
+so a benchmarking key can be minted with raised limits, and the harness now
+counts 429s separately, refuses to call the run `valid`, and prints the exact
+command to fix it. A benchmark that silently reports the limiter's throughput as
+the model's is worse than one that fails.
 
 ---
 
-## 5. Training cost — estimated, not yet measured
-
-From `make estimate`, using token counts measured with the real tokenizer:
+## 5. Training cost — measured
 
 | | |
 |---|---:|
-| Parameters | 1.54 B |
+| Parameters | 1.54 B (18.5 M trainable, 1.18%) |
 | Samples | 20,000 × 2 epochs = 40,000 |
 | Optimiser steps | 2,500 (effective batch 16) |
 | Tokens/example | mean 121, median 119, p95 150 |
 | Total tokens | 4.82 M |
-| Compute | 44.6 PFLOPs (6·N·T) |
+| **Wall clock** | **4,135 s (1.149 GPU-hours)** |
+| **Throughput** | **8.90 samples/s** |
+| **Peak VRAM** | **4.83 GB of 8 GB** |
+| Final train loss | 0.0294 |
 
-| GPU | Est. hours | Est. $ |
-|---|---:|---:|
-| RTX 4060 8GB (local) | 2.58 | — |
-| RTX 4090 24GB | 0.34 | 0.14 |
-| L4 24GB | 0.86 | 0.64 |
-| A100 40GB | 0.12 | 0.20 |
-| H100 80GB | 0.07 | 0.21 |
+The 20-step calibration predicted **1.19 h**; the run took **1.149 h** — within
+3.4%. The pre-calibration analytic estimate said 2.58 h, because it assumed an
+MFU of 0.16 for this card. Measured MFU is 0.35, and `configs/gpus.yaml` now
+carries the measurement. See [GPU_HOURS.md](GPU_HOURS.md).
 
-These are **lower bounds**. At ~1,900 tokens per optimiser step the run is bound
-by per-step fixed costs rather than matrix multiplies, so expect 2-4× on the
-faster cards. `dllm train estimate` prints this caveat and replaces the modelled
-number with a measured one after a 20-step calibration run. Detail in
-[GPU_HOURS.md](GPU_HOURS.md).
+Full session on the 4060, end to end: ~2.5 hours including both evals.
 
 ---
 
-## Reproducing everything
+## 6. Merge fidelity
+
+`make merge` refuses to export a checkpoint that does not reproduce
+adapter-on-base behaviour. Measured on this run:
+
+| Check | Argmax agreement | max \|Δlogit\| |
+|---|---:|---:|
+| Merge fidelity (fp32 vs fp32) | **1.000000** | 0.000253 |
+| Export cast (bf16 vs fp32) | 0.962025 | 1.871325 |
+
+The merge is numerically exact. Casting the result to bf16 for export moves
+3.8% of next-token choices — which is what reduced precision does, and is why
+only the first figure is gated. The eval above was run on the exported bf16
+checkpoint, so that cost is already inside the reported accuracy.
+
+---
+
+## Reproducing
 
 ```bash
 make setup
 make audit && make data
-make baseline
 make estimate
+make baseline
+make train && make merge && make eval && make compare && make gate
+docker compose up -d --build && make bench
 ```
 
 Scorecards are committed as JSON under `evals/results/`, with per-item
 predictions in the matching `.records.jsonl`, so any number above can be
-recomputed or disputed without re-running inference.
+recomputed — or disputed — without re-running inference.

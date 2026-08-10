@@ -123,19 +123,33 @@ class KeyStore:
         return cls([])
 
 
-def mint_keys(count: int = 1, *, tier: str = "default") -> list[dict]:
-    """Generate keys. The plaintext is returned once and never stored."""
+def mint_keys(
+    count: int = 1,
+    *,
+    tier: str = "default",
+    rpm: int | None = None,
+    tokens_per_min: int | None = None,
+) -> list[dict]:
+    """Generate keys. The plaintext is returned once and never stored.
+
+    ``rpm`` and ``tokens_per_min`` override the gateway defaults for this key.
+    That is what benchmarking needs: a load generator pointed at the default
+    60 rpm limit measures the rate limiter, not the model.
+    """
     out: list[dict] = []
     for _ in range(count):
         raw = KEY_PREFIX + secrets.token_urlsafe(32)
-        out.append(
-            {
-                "key_id": secrets.token_hex(8),
-                "key": raw,  # show once; store only the hash
-                "key_hash": hash_key(raw),
-                "tier": tier,
-            }
-        )
+        entry = {
+            "key_id": secrets.token_hex(8),
+            "key": raw,  # show once; store only the hash
+            "key_hash": hash_key(raw),
+            "tier": tier,
+        }
+        if rpm is not None:
+            entry["rpm"] = rpm
+        if tokens_per_min is not None:
+            entry["tokens_per_min"] = tokens_per_min
+        out.append(entry)
     return out
 
 

@@ -358,11 +358,18 @@ def serve_gateway(config: str = ConfigOpt, set_: list[str] = SetOpt) -> None:
 def serve_keys(
     count: int = typer.Option(1, help="How many keys to mint."),
     tier: str = typer.Option("default", help="Rate-limit tier for the key."),
+    rpm: int = typer.Option(None, help="Per-key requests/min, overriding the gateway default."),
+    tokens_per_min: int = typer.Option(None, help="Per-key tokens/min override."),
 ) -> None:
-    """Mint API keys for the gateway and print the hashed entries to store."""
+    """Mint API keys for the gateway and print the hashed entries to store.
+
+    Benchmarking needs `--rpm` and `--tokens-per-min` raised well above the
+    defaults, or the load generator measures the rate limiter rather than the
+    model.
+    """
     from dllm.serve.gateway.auth import mint_keys
 
-    for entry in mint_keys(count, tier=tier):
+    for entry in mint_keys(count, tier=tier, rpm=rpm, tokens_per_min=tokens_per_min):
         typer.echo(json.dumps(entry))
 
 

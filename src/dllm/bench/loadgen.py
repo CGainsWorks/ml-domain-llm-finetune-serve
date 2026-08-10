@@ -61,6 +61,16 @@ class RequestSample:
     status: int = 0
     error: str = ""
 
+    @property
+    def rate_limited(self) -> bool:
+        """A 429 is the gateway declining, not the server failing.
+
+        Counting it as a plain failure produces the worst possible benchmark
+        output: '48/48 requests failed' with healthy latencies and no hint that
+        the load generator throttled itself against its own gateway.
+        """
+        return self.status == 429
+
 
 @dataclass
 class LevelResult:
@@ -71,6 +81,7 @@ class LevelResult:
     duration_s: float
     requests_per_s: float
     output_tokens_per_s: float
+    rate_limited: int = 0
     e2e_ms: dict[str, float] = field(default_factory=dict)
     ttft_ms: dict[str, float] = field(default_factory=dict)
     itl_ms: dict[str, float] = field(default_factory=dict)
@@ -214,6 +225,7 @@ async def _run_level(
         requests=total,
         successes=len(ok),
         failures=len(samples) - len(ok),
+        rate_limited=sum(1 for s in samples if s.rate_limited),
         duration_s=round(duration, 3),
         requests_per_s=round(len(ok) / duration, 3) if duration else 0.0,
         output_tokens_per_s=round(total_out / duration, 2) if duration else 0.0,
@@ -255,8 +267,17 @@ def run_benchmark(
             result.e2e_ms.get("p95", 0),
             result.ttft_ms.get("p50", "n/a"),
         )
-        if result.failures:
-            log.warning("  %d/%d requests failed", result.failures, result.requests)
+        if result.rate_limited:
+            log.error(
+                "  %d/%d requests were RATE LIMITED (429) by the gateway. These numbers "
+                "measure the rate limiter, not the model. Mint a benchmarking key with "
+                "raised limits:  dllm serve keys --rpm 100000 --tokens-per-min 100000000",
+                result.rate_limited,
+                result.requests,
+            )
+        other_failures = result.failures - result.rate_limited
+        if other_failures:
+            log.warning("  %d/%d requests failed", other_failures, result.requests)
 
     best = max(results, key=lambda r: r.output_tokens_per_s) if results else None
     report = {
@@ -274,6 +295,9 @@ def run_benchmark(
             "p95_latency_ms_at_peak": best.e2e_ms.get("p95") if best else None,
             "ttft_p50_ms_at_peak": best.ttft_ms.get("p50") if best else None,
             "total_failures": sum(r.failures for r in results),
+            "total_rate_limited": sum(r.rate_limited for r in results),
+            # A run with any 429s measured the gateway's limiter, not the model.
+            "valid": sum(r.rate_limited for r in results) == 0,
         },
     }
 
@@ -295,8 +319,8 @@ def render_markdown(report: dict[str, Any]) -> str:
         f"{report['requests_per_level']} requests per level  ",
         f"- Run: `{report['created_at']}`",
         "",
-        "| Concurrency | req/s | out tok/s | TTFT p50 | TTFT p95 | e2e p50 | e2e p95 | e2e p99 | fail |",
-        "|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
+        "| Concurrency | req/s | out tok/s | TTFT p50 | TTFT p95 | e2e p50 | e2e p95 | e2e p99 | fail | 429 |",
+        "|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
     ]
     for level in report["levels"]:
         lines.append(
@@ -304,9 +328,18 @@ def render_markdown(report: dict[str, Any]) -> str:
             f"{level['output_tokens_per_s']:.1f} | "
             f"{level['ttft_ms'].get('p50', 0):.0f} ms | {level['ttft_ms'].get('p95', 0):.0f} ms | "
             f"{level['e2e_ms'].get('p50', 0):.0f} ms | {level['e2e_ms'].get('p95', 0):.0f} ms | "
-            f"{level['e2e_ms'].get('p99', 0):.0f} ms | {level['failures']} |"
+            f"{level['e2e_ms'].get('p99', 0):.0f} ms | "
+            f"{level['failures'] - level.get('rate_limited', 0)} | {level.get('rate_limited', 0)} |"
         )
     s = report["summary"]
+    if not s.get("valid", True):
+        lines += [
+            "",
+            f"> **These numbers are not valid.** {s['total_rate_limited']} requests were "
+            "rate limited (429) by the gateway, so the sweep measured the rate limiter "
+            "rather than the model. Re-run with a benchmarking key: "
+            "`dllm serve keys --rpm 100000 --tokens-per-min 100000000`.",
+        ]
     lines += [
         "",
         f"Peak decode throughput: **{s['peak_output_tokens_per_s']:.1f} output tokens/s** "

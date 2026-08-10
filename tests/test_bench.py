@@ -149,6 +149,115 @@ class TestStreamingRequest:
         assert not s.ok and s.status == 503
 
 
+class TestRateLimitAccounting:
+    """A 429 is the gateway declining, not the server failing.
+
+    The first real benchmark run reported 273 of 288 requests failed with
+    healthy latencies and no hint that the load generator had throttled itself
+    against its own gateway's 60 rpm default.
+    """
+
+    def test_429_is_classified_as_rate_limited(self) -> None:
+        assert RequestSample(ok=False, status=429).rate_limited
+
+    @pytest.mark.parametrize("status", [0, 200, 400, 500, 503])
+    def test_other_statuses_are_not(self, status: int) -> None:
+        assert not RequestSample(ok=False, status=status).rate_limited
+
+    def test_report_marks_a_throttled_run_invalid(self) -> None:
+        report = {
+            "endpoint": "http://x/v1",
+            "model": "m",
+            "streaming": True,
+            "max_tokens": 128,
+            "requests_per_level": 48,
+            "created_at": "2026-01-01T00:00:00+00:00",
+            "levels": [
+                {
+                    "concurrency": 1,
+                    "requests_per_s": 1.0,
+                    "output_tokens_per_s": 10.0,
+                    "ttft_ms": {"p50": 50, "p95": 90},
+                    "e2e_ms": {"p50": 100, "p95": 200, "p99": 300},
+                    "failures": 40,
+                    "rate_limited": 40,
+                }
+            ],
+            "summary": {
+                "peak_output_tokens_per_s": 10.0,
+                "peak_at_concurrency": 1,
+                "p50_latency_ms_at_peak": 100,
+                "p95_latency_ms_at_peak": 200,
+                "total_rate_limited": 40,
+                "valid": False,
+            },
+        }
+        body = render_markdown(report)
+        assert "not valid" in body
+        assert "--rpm" in body, "the report must say how to fix it"
+
+    def test_clean_run_has_no_warning(self) -> None:
+        report = {
+            "endpoint": "http://x/v1",
+            "model": "m",
+            "streaming": True,
+            "max_tokens": 128,
+            "requests_per_level": 48,
+            "created_at": "2026-01-01T00:00:00+00:00",
+            "levels": [
+                {
+                    "concurrency": 1,
+                    "requests_per_s": 1.0,
+                    "output_tokens_per_s": 10.0,
+                    "ttft_ms": {"p50": 50, "p95": 90},
+                    "e2e_ms": {"p50": 100, "p95": 200, "p99": 300},
+                    "failures": 0,
+                    "rate_limited": 0,
+                }
+            ],
+            "summary": {
+                "peak_output_tokens_per_s": 10.0,
+                "peak_at_concurrency": 1,
+                "p50_latency_ms_at_peak": 100,
+                "p95_latency_ms_at_peak": 200,
+                "total_rate_limited": 0,
+                "valid": True,
+            },
+        }
+        assert "not valid" not in render_markdown(report)
+
+
+class TestBenchmarkKeyMinting:
+    def test_limits_are_recorded_on_the_key(self) -> None:
+        from dllm.serve.gateway.auth import mint_keys
+
+        entry = mint_keys(1, tier="bench", rpm=100_000, tokens_per_min=10**8)[0]
+        assert entry["rpm"] == 100_000
+        assert entry["tokens_per_min"] == 10**8
+
+    def test_default_key_carries_no_overrides(self) -> None:
+        from dllm.serve.gateway.auth import mint_keys
+
+        entry = mint_keys(1)[0]
+        assert "rpm" not in entry and "tokens_per_min" not in entry
+
+    def test_the_override_actually_raises_the_limit(self) -> None:
+        """End to end through the limiter, not just the key record."""
+        import asyncio
+
+        from dllm.serve.gateway.ratelimit import RateLimiter
+
+        limiter = RateLimiter(rpm=60, burst=2, tokens_per_min=1000)
+
+        async def go():
+            return [
+                await limiter.check("bench", estimated_tokens=50, rpm=100_000, tokens_per_min=10**8)
+                for _ in range(40)
+            ]
+
+        assert all(r.allowed for r in asyncio.run(go()))
+
+
 class TestPrompts:
     def test_falls_back_when_no_prepared_split(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from pathlib import Path

@@ -27,43 +27,56 @@ Full diagram and rationale: [docs/architecture.md](docs/architecture.md).
 
 ---
 
-## Status
+## Results
 
-| Stage | State |
-|---|---|
-| Licence audit + dataset card | **Done**, runs in CI, blocks on violation |
-| Dataset preparation (78,577 → 20,000/500/500/200) | **Done** |
-| Eval harness (execution-based) | **Done**, 204 unit tests |
-| **Baseline scorecard** | **Done and committed** — see below |
-| LoRA training, resumable, MLflow | **Done**, verified end to end on CPU |
-| Adapter merge + verification | **Done**, verified |
-| Promotion gate | **Done**, 20 unit tests |
-| MLflow registry promotion | **Done** (SQLite backend) |
-| vLLM + FastAPI gateway | **Done**; not yet run against a real GPU |
-| Benchmarks | **Harness done**; no numbers yet — needs a served model |
-| CI/CD with eval-gated deploy | **Done** |
-| **Fine-tuning run** | **Not yet run.** No fine-tuned numbers are claimed. |
+The whole pipeline has been run end to end on an RTX 4060. Every number below
+was measured by a script in this repository.
 
-Nothing in this repository quotes a number that was not measured. Where a number
-does not exist yet, it says so.
+### Base vs fine-tuned — 500 held-out items
 
-## The baseline
+| Metric | Base | Fine-tuned | Δ |
+|---|---:|---:|---:|
+| **`exec_acc_nonempty`** (gate metric) | 0.7865 | **0.8932** | **+0.1068** |
+| `exec_acc` | 0.7860 | 0.8940 | +0.1080 |
+| `exact_match_norm` | 0.5960 | 0.7960 | +0.2000 |
+| `schema_adherence` | 0.9880 | 0.9960 | +0.0080 |
+| `valid_sql_rate` | 0.9980 | 0.9960 | −0.0020 |
+| `general_guard.answers_in_prose` | 0.9950 | 0.9950 | +0.0000 |
 
-Qwen2.5-1.5B-Instruct, no fine-tuning, 500 held-out items + 200 guard items,
-greedy decoding, 2,194 s on one RTX 4060.
+Correct answers: **319 → 447** of 500. **No catastrophic forgetting** — one
+general question in 200 was answered with SQL, before and after.
 
-| Metric | Value |
-|---|---:|
-| **`exec_acc_nonempty`** (the gate metric) | **0.7865** |
-| `exec_acc` | 0.7860 |
-| `schema_adherence` | 0.9880 |
-| `valid_sql_rate` | 0.9980 |
-| `exact_match_norm` | 0.5960 |
-| `general_guard.answers_in_prose` | 0.9950 |
+**Gate: PROMOTE**, all six checks passed. Registered as `domain-sql` v1 with
+`deployment_target` moved to it.
 
-Reproduce: `make baseline`. Raw scorecard: [`evals/results/baseline.json`](evals/results/baseline.json).
+Fine-tuning also made inference **4× faster** on the same hardware (1,690 s →
+411 s for the same 700 items): the tuned model stops at the answer instead of
+continuing into explanation.
 
-A fine-tune must reach **0.8365** to clear the gate.
+### Serving — real vLLM 0.26.0 behind the gateway, on the 4060
+
+| Concurrency | req/s | out tok/s | TTFT p50 | e2e p50 | e2e p95 | fail |
+|---:|---:|---:|---:|---:|---:|---:|
+| 1 | 2.79 | 68.8 | 30 ms | 358 ms | 490 ms | 0 |
+| 8 | 19.95 | 491.8 | 41 ms | 375 ms | 506 ms | 0 |
+| 32 | 49.34 | **1,199.6** | 118 ms | 487 ms | 690 ms | 0 |
+
+Throughput scales ~17× for 32× concurrency while p50 latency rises 36%. The
+cost of concurrency lands almost entirely on time-to-first-token.
+
+### Training cost — measured
+
+1.149 GPU-hours, 8.90 samples/s, 4.83 GB peak VRAM of 8 GB. A 20-step
+calibration predicted 1.19 h — within 3.4%.
+
+Full detail, including two measurement bugs that would have inflated these
+numbers: **[docs/results.md](docs/results.md)**.
+
+### What has not been run
+
+- `.github/workflows/train.yml` needs a self-hosted GPU runner.
+- The 7B profile (`configs/rented_a100.yaml`) has never been trained; it does
+  not fit 8 GB.
 
 ## Quickstart
 

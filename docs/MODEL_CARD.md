@@ -2,10 +2,8 @@
 
 A LoRA adaptation of Qwen2.5-1.5B-Instruct for natural-language → SQL.
 
-> **Status.** The pipeline, the eval harness and the **baseline** are complete
-> and reproducible. The fine-tuned numbers in this card are marked
-> `NOT YET RUN` until a training run has been executed and gated. Nothing here
-> quotes a number that has not been measured.
+> **Status.** Trained, evaluated, gated, registered and served. Every number in
+> this card was measured on an RTX 4060 by a script in this repository.
 
 ---
 
@@ -71,10 +69,32 @@ Note the gap between `exec_acc` (0.786) and `exact_match_norm` (0.596). Nineteen
 points of correct answers are written differently from the gold query. Any
 text-match evaluation of this task under-reports by roughly that much.
 
-### Fine-tuned
+### Fine-tuned — measured
 
-`NOT YET RUN.` Run `make train && make merge && make eval && make compare`;
-the comparison lands in [results.md](results.md).
+LoRA r=16 on 20,000 examples for 2 epochs (1.149 GPU-hours), merged and
+exported to bf16, evaluated on the identical holdout with the identical prompt.
+
+| Metric | Base | Fine-tuned | Δ |
+|---|---:|---:|---:|
+| **`exec_acc_nonempty`** | 0.7865 | **0.8932** | **+0.1068** |
+| `exec_acc` | 0.7860 | 0.8940 | +0.1080 |
+| `exact_match_norm` | 0.5960 | 0.7960 | +0.2000 |
+| `schema_adherence` | 0.9880 | 0.9960 | +0.0080 |
+| `valid_sql_rate` | 0.9980 | 0.9960 | −0.0020 |
+| `general_guard.answers_in_prose` | 0.9950 | 0.9950 | +0.0000 |
+
+Correct answers 319 → 447 of 500. **Gate: PROMOTE**, all six checks passed.
+
+Note that `exact_match_norm` rose more than `exec_acc` (+0.20 vs +0.11). Part
+of what the model learned is the dataset's *formatting* conventions, not just
+its semantics. Execution accuracy is the honest number because it does not care
+how a query is written, and it is the one the gate uses.
+
+### Serving
+
+Real vLLM 0.26.0 on the same 8 GB card, behind the gateway: peak **1,199.6
+output tokens/s** at concurrency 32, TTFT p50 118 ms, e2e p50 487 ms, zero
+failures. Full sweep in [results.md](results.md#4-serving-benchmarks).
 
 ### Promotion thresholds
 
@@ -166,8 +186,9 @@ Stated plainly, because a model card that lists only strengths is marketing.
 
 | | |
 |---|---|
-| Baseline eval | 2,194 s on one RTX 4060 (8 GB) |
-| Estimated training | ~2.6 GPU-hours on an RTX 4060, ~0.2-0.5 on an A100 |
+| Baseline eval | 1,690 s on one RTX 4060 (8 GB) |
+| Fine-tuned eval | 411 s on the same card |
+| Training | **1.149 GPU-hours measured**, 4.83 GB peak VRAM |
 | Total compute | ~45 PFLOPs for the reference training run |
 
 Small by current standards, which is the point: the interesting engineering here
