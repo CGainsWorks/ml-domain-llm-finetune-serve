@@ -1,0 +1,16 @@
+id: sql_exec_holdout
+kind: sql_execution
+dataset: data/processed/test.jsonl
+primary_metric: exec_acc_nonempty
+description: >
+  Held-out text-to-SQL items. Each prediction is executed against a SQLite
+  database materialised from the item's own CREATE TABLE schema and seeded with
+  the literals in the gold query, then its result set is compared to the gold
+  result set. Items in this split were never seen during training: the split is
+  assigned by content hash, so it is stable across re-preparation.
+options:
+  # 3 anchor rows carry the gold query's literals so its predicate is never
+  # vacuous; 9 filler rows give aggregates and ORDER BY something to work with.
+  anchor_rows: 3
+  filler_rows: 9
+  keep_records: true

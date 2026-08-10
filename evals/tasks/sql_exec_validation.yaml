@@ -1,0 +1,13 @@
+id: sql_exec_validation
+kind: sql_execution
+dataset: data/processed/validation.jsonl
+primary_metric: exec_acc_nonempty
+description: >
+  Same scoring as sql_exec_holdout, run against the validation split. This is
+  the split used for checkpoint selection and mid-training monitoring, so that
+  the test split stays untouched until the final scorecard. Selecting a
+  checkpoint on the test split would make the headline number optimistic.
+options:
+  anchor_rows: 3
+  filler_rows: 9
+  keep_records: false

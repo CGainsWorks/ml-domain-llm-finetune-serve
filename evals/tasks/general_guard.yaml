@@ -1,0 +1,12 @@
+id: general_guard
+kind: instruction_guard
+dataset: data/processed/guard.jsonl
+primary_metric: answers_in_prose
+description: >
+  Catastrophic-forgetting guard. General closed-book questions from Dolly with
+  anything database-flavoured filtered out. Measures whether the SQL fine-tune
+  has taught the model to answer everything with a SELECT statement. Not a
+  measure of general knowledge -- it is a check that a specific, cheap-to-detect
+  and highly likely failure mode has not occurred.
+options:
+  keep_records: true
