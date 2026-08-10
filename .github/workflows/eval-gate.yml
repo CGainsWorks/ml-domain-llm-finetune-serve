@@ -21,6 +21,14 @@ on:
         required: false
         default: configs/base.yaml
         type: string
+      scorecard_artifact:
+        description: >
+          Artifact holding scorecards produced by an upstream job. Without this
+          the gate reads whatever is committed, which for a training run means
+          gating the previous model instead of the one just trained.
+        required: false
+        default: ""
+        type: string
     outputs:
       promote:
         description: "'true' only if every threshold passed."
@@ -56,6 +64,23 @@ jobs:
       - run: |
           pip install -r requirements/base.txt
           pip install -e . --no-deps
+
+      # Overlays freshly-produced scorecards onto the checkout. Without this a
+      # training run would be gated against the scorecard committed last time.
+      - name: Fetch scorecards from the upstream job
+        if: inputs.scorecard_artifact != ''
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.scorecard_artifact }}
+          path: artifact-scorecards
+
+      - name: Overlay fetched scorecards
+        if: inputs.scorecard_artifact != ''
+        run: |
+          mkdir -p evals/results
+          find artifact-scorecards -name '*.json' -exec cp -v {} evals/results/ \;
+          echo "scorecards now present:"
+          ls -la evals/results/
 
       - name: Baseline scorecard must exist
         run: |

@@ -1,5 +1,10 @@
 # Profile for a rented 40-80 GB card (A100, H100, L40S, A6000).
 #
+# STATUS: NOT YET RUN. Everything else in configs/ has been executed end to
+# end; this one has not, because a 7B model does not fit the 8 GB card this was
+# developed on. Treat the numbers it produces as untested until someone trains
+# it. The reference result in docs/results.md is the 1.5B profile.
+#
 # Differences from the 8 GB profile: a bigger base model, no gradient
 # checkpointing (there is memory to spare and it costs ~30% throughput), a
 # larger micro-batch, and longer sequences. Effective batch is held at 16 so

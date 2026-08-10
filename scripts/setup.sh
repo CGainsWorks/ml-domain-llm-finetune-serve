@@ -9,9 +9,23 @@ set -euo pipefail
 CUDA_TAG="${CUDA_TAG:-cu126}"
 TORCH_VERSION="${TORCH_VERSION:-2.13.0}"
 VENV="${VENV:-.venv}"
-PY="${PY:-python3}"
 
 cd "$(dirname "$0")/.."
+
+# Git Bash on Windows ships `python` but usually not `python3`, so defaulting to
+# python3 makes this script fail on exactly the machines most likely to be a
+# self-hosted GPU runner.
+if [ -z "${PY:-}" ]; then
+  if command -v python3 >/dev/null 2>&1; then
+    PY=python3
+  elif command -v python >/dev/null 2>&1; then
+    PY=python
+  else
+    echo "no python interpreter on PATH" >&2
+    exit 1
+  fi
+fi
+echo ">> using interpreter: $PY ($($PY --version 2>&1))"
 
 if [ ! -d "$VENV" ]; then
   echo ">> creating virtualenv at $VENV"
