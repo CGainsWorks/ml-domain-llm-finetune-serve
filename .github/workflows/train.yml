@@ -18,6 +18,21 @@ name: train
 # `--ephemeral` makes the runner accept one job and exit, so nothing is left
 # listening afterwards.
 #
+# WINDOWS RUNNERS: put Git Bash ahead of System32 on the runner's PATH before
+# starting it:
+#
+#   $env:PATH = "C:\Program Files\Git\bin;C:\Program Files\Git\usr\bin;$env:PATH"
+#   ./run.cmd
+#
+# `shell: bash` resolves whatever `bash` is first on PATH. If WSL is installed,
+# that is C:\Windows\System32\bash.exe -- WSL's bash, which cannot read the
+# Windows path of the script the runner generates. The failure is opaque:
+#
+#   /bin/bash: C:Usersuseractions-runner_work_temp<guid>.sh: No such file
+#
+# The backslashes have been eaten as escapes. It is not a missing file and not
+# a permissions problem; it is the wrong bash.
+#
 # Re-running resumes rather than restarting: the checkpoint directory is cached
 # and `train.resume: auto` picks up the newest checkpoint.
 
