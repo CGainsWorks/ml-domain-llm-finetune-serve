@@ -19,6 +19,18 @@ from transformers import TrainerCallback, TrainerControl, TrainerState, Training
 log = logging.getLogger(__name__)
 
 
+def _human(seconds: float) -> str:
+    """Seconds as '1h 12m'. An ETA in seconds is not a number anyone reads."""
+    seconds = max(0, int(seconds))
+    hours, rem = divmod(seconds, 3600)
+    minutes, secs = divmod(rem, 60)
+    if hours:
+        return f"{hours}h {minutes:02d}m"
+    if minutes:
+        return f"{minutes}m {secs:02d}s"
+    return f"{secs}s"
+
+
 class HeartbeatCallback(TrainerCallback):
     """Write run progress to a JSON file after every logging step.
 
@@ -26,26 +38,61 @@ class HeartbeatCallback(TrainerCallback):
     finish time without attaching to the training process.
     """
 
+    # Steps kept for the sliding-rate window. The ETA must reflect how fast the
+    # run is going *now*, not the average since process start: model loading,
+    # dataset tokenisation and CUDA warm-up all land in the first few seconds
+    # and drag a cumulative rate down badly. At step 10 of 2500 the cumulative
+    # figure projected 2.8 hours for a run that was measured at 1.2, which is
+    # exactly the wrong answer to give someone deciding whether to keep paying.
+    WINDOW = 20
+
     def __init__(self, path: Path, total_steps_hint: int = 0) -> None:
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.started = time.time()
         self.total_hint = total_steps_hint
+        self._history: list[tuple[int, float]] = []
+
+    def _rates(self, done: int, elapsed: float, now: float | None = None) -> tuple[float, float]:
+        """(cumulative steps/s, recent steps/s). Recent falls back to cumulative.
+
+        ``now`` is injectable so the windowing logic is testable without
+        sleeping; production callers leave it unset.
+        """
+        now = time.time() if now is None else now
+        self._history.append((done, now))
+        if len(self._history) > self.WINDOW:
+            self._history.pop(0)
+
+        cumulative = done / elapsed if elapsed > 0 else 0.0
+
+        recent = cumulative
+        if len(self._history) >= 2:
+            first_step, first_time = self._history[0]
+            d_steps = done - first_step
+            d_time = now - first_time
+            if d_steps > 0 and d_time > 0:
+                recent = d_steps / d_time
+        return cumulative, recent
 
     def _write(self, state: TrainerState, extra: dict | None = None) -> None:
         elapsed = time.time() - self.started
         total = state.max_steps or self.total_hint
         done = state.global_step
-        rate = done / elapsed if elapsed > 0 else 0.0
-        remaining = (total - done) / rate if rate > 0 and total else None
+        cumulative, recent = self._rates(done, elapsed)
+        remaining = (total - done) / recent if recent > 0 and total else None
         payload = {
             "updated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
             "global_step": done,
             "max_steps": total,
             "epoch": round(state.epoch or 0.0, 4),
             "elapsed_s": round(elapsed, 1),
-            "steps_per_s": round(rate, 4),
+            # Both are reported: the recent rate drives the ETA, the cumulative
+            # one is what you want when reconciling against the wall clock.
+            "steps_per_s_recent": round(recent, 4),
+            "steps_per_s_cumulative": round(cumulative, 4),
             "eta_s": round(remaining, 1) if remaining is not None else None,
+            "eta_human": _human(remaining) if remaining is not None else None,
             "best_metric": state.best_metric,
             **(extra or {}),
         }

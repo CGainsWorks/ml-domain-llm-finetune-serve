@@ -34,7 +34,13 @@ CONFIGS = ROOT / "configs"
 EVALS = ROOT / "evals"
 EVAL_TASKS = EVALS / "tasks"
 EVAL_RESULTS = EVALS / "results"
-DOCS = ROOT / "docs"
+
+# Where generated documentation is written. Overridable because the smoke run
+# regenerates the dataset card and licence audit from a 64-example toy dataset,
+# and writing those to the real docs/ silently replaced the committed cards with
+# smoke numbers. Isolating the data directory was not enough; the outputs need
+# redirecting too.
+DOCS = Path(os.environ.get("DLLM_DOCS_DIR", ROOT / "docs"))
 
 # Generated, git-ignored.
 DATA = Path(os.environ.get("DLLM_DATA_DIR", ROOT / "data"))

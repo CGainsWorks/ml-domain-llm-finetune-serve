@@ -50,15 +50,15 @@ Run with `dllm data prepare`. Every step is deterministic given the config seed.
 | Dropped: duplicate question+schema | 4 |
 | Dropped: gold SQL will not execute (eval splits) | 86 |
 | **Dropped, total** | **283** |
-| **Kept after the configured cap** | **128** |
+| **Kept after the configured cap** | **21,000** |
 
 ### Splits
 
 | Split | Rows | Purpose |
 |---|---:|---|
-| train | 64 | LoRA fine-tuning |
-| validation | 32 | in-loop monitoring, checkpoint selection |
-| test | 32 | the held-out scorecard; never trained on |
+| train | 20,000 | LoRA fine-tuning |
+| validation | 500 | in-loop monitoring, checkpoint selection |
+| test | 500 | the held-out scorecard; never trained on |
 | guard | 200 | catastrophic-forgetting check |
 
 Splits are assigned by **content hash**, not by shuffling:

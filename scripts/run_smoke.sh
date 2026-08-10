@@ -27,6 +27,14 @@ export DLLM_DATA_DIR="${DLLM_DATA_DIR:-$PWD/artifacts/smoke_data}"
 mkdir -p "$DLLM_DATA_DIR"
 echo "smoke data directory: $DLLM_DATA_DIR"
 
+# And its generated docs. The smoke run regenerates the dataset card and the
+# licence audit from a 64-example toy dataset; writing those into the real
+# docs/ replaced the committed cards with smoke numbers, which is exactly the
+# kind of change that gets committed by accident.
+export DLLM_DOCS_DIR="${DLLM_DOCS_DIR:-$PWD/artifacts/smoke_docs}"
+mkdir -p "$DLLM_DOCS_DIR"
+echo "smoke docs directory: $DLLM_DOCS_DIR"
+
 step() { echo ""; echo "=== $* ==="; }
 
 step "1/7 licence audit"

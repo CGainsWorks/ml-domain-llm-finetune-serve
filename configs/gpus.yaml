@@ -15,12 +15,16 @@
 # Treat it as an order of magnitude and check your provider before renting.
 
 gpus:
+  # MEASURED, not assumed. A 20-step calibration of the reference 1.5B config
+  # on this card ran at 9.35 samples/s, which works out at ~10.4 effective
+  # TFLOPS against a 30 TFLOPS dense peak -> MFU 0.35. The original 0.16 guess
+  # overstated the run by 2.2x. Every other row below is still an assumption.
   - name: RTX 4060 8GB
     vram_gb: 8
     bf16_tflops_dense: 30
-    mfu: 0.16
+    mfu: 0.35
     usd_per_hour: 0.0        # the card you already own
-    note: Local. Fits 1.5B LoRA in bf16; 7B needs 4-bit and is slow.
+    note: Local. MEASURED 9.35 samples/s on the 1.5B config, 4.6 GB peak VRAM.
 
   - name: RTX 4090 24GB
     vram_gb: 24

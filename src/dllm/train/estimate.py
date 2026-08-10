@@ -336,11 +336,14 @@ def render_estimate(cfg: PipelineConfig, only_gpu: str | None = None) -> str:
         lines += [
             "",
             f"  CAVEAT: only ~{tokens_per_step:,.0f} tokens per optimiser step. Below roughly",
-            "  8k the run is bound by per-step fixed costs (kernel launches, optimiser,",
-            "  dataloader), not by matmuls, and the FLOPs table above is a LOWER BOUND.",
-            "  Expect 2-4x these figures on the faster cards, where the fixed costs are",
-            "  a larger share. Raise train.per_device_batch_size or enable train.packing",
-            "  to close the gap, and calibrate before trusting any of it.",
+            "  8k, per-step fixed costs (kernel launches, optimiser, dataloader) matter as",
+            "  much as the matmuls, so every row above is only as good as its assumed",
+            "  utilisation figure -- and it can be wrong in EITHER direction. Measured on",
+            "  an RTX 4060 the reference config hit 0.35 MFU, more than twice the 0.16",
+            "  originally assumed, so the estimate was 2.2x pessimistic on that card.",
+            "  The faster cards are the least trustworthy rows, because fixed costs are a",
+            "  larger share of their step time. Raise train.per_device_batch_size or turn",
+            "  on train.packing to close the gap. Calibrate before trusting any of it.",
         ]
 
     if "calibrated" in est:

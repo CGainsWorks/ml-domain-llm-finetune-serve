@@ -19,7 +19,7 @@ from pathlib import Path
 import typer
 
 from dllm.config import load_config
-from dllm.paths import DOCS, ROOT
+from dllm.paths import DATA, DOCS, ROOT
 
 app = typer.Typer(add_completion=False, help="Domain LLM: prepare, train, evaluate, serve.")
 data_app = typer.Typer(help="Dataset preparation and licence auditing.")
@@ -88,7 +88,9 @@ def data_audit(config: str = ConfigOpt, set_: list[str] = SetOpt) -> None:
         base_model_licence=cfg.model.licence,
         base_model_commercial=cfg.model.commercial_use,
     )
-    write_audit(manifest, ROOT / "data" / "licence_audit.json", DOCS / "LICENCE_AUDIT.md")
+    # DATA, not ROOT/"data": the audit must land in the same place a smoke run
+    # redirects its data to, or it writes into the real tree.
+    write_audit(manifest, DATA / "licence_audit.json", DOCS / "LICENCE_AUDIT.md")
 
     for f in manifest["findings"]:
         typer.echo(f"[{f['level'].upper():5s}] {f['source']}: {f['message']}")
