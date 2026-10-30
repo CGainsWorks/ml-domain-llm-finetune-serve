@@ -353,11 +353,19 @@ useful for dashboards and for reconciling against Meterly's own totals. Meterly
 rate-limits each of its API keys to 600 requests a minute, which is why the
 sketch batches.
 
-## The trained adapter: packaged, not yet published
+## The trained adapter: published
+
+The adapter behind the committed scorecard is published as the
+[`adapter-v1`](https://github.com/CGainsWorks/ml-domain-llm-finetune-serve/releases/tag/adapter-v1)
+release: the package archive, its manifest and `SHA256SUMS`. Check the archive
+against `SHA256SUMS` before unpacking, then load it with PEFT on top of
+Qwen2.5-1.5B-Instruct at revision `989aa79`. The tokenizer is not in the
+package; load it from the base model at that revision, since training does not
+change it.
 
 `make package` (`dllm model package`) turns a trained adapter into a release
 package under the git-ignored `artifacts/release/`: the adapter weights and
-config (with the base model revision pinned), tokenizer and chat template, the
+config (with the base model revision pinned), the chat template, the
 Apache-2.0 licence text, a NOTICE carrying every attribution the licence audit
 requires, the model card, a deterministic `.tar.gz`, `SHA256SUMS` and a JSON
 manifest listing each file's name, size, SHA-256 and licence plus the training
@@ -371,7 +379,7 @@ run of 2026-08-10, `evals/results/finetuned.json`):
 | File | Size | SHA-256 |
 |---|---:|---|
 | `adapter_model.safetensors` | 73,911,112 bytes | `32a6bf05dfdbedf861faec2190bbf70ae021e774b49668752967f282434a208b` |
-| `domain-sql-lora-v1.tar.gz` (whole package) | 70,531,428 bytes | `815ade2ebfcaa51ccd03ea481bf323dee1ac1ecbc19b43cfcb92fc328aaaf3ee` |
+| `domain-sql-lora-v1.tar.gz` (whole package) | 68,471,232 bytes | `5658d0fb5c7206b8d1a8768a7f93e7a14e1ffbda97e64bc245e6c579b91c288c` |
 
 **Licence check.** The base model, Qwen2.5-1.5B-Instruct at the pinned revision
 `989aa79`, is Apache-2.0 and ungated, which permits redistributing a derivative
@@ -382,12 +390,10 @@ it; both are in the package. The training data is CC-BY-4.0
 share-alike term reaches trained weights is not settled law; the licence audit's
 position is that weights are not generally treated as an adapted work.
 
-**Not published.** Uploading it as a GitHub release asset is waiting on the
-owner's decision, partly because of that share-alike question. Until then the
-served model is reproducible only by training it (1.149 GPU-hours on an 8 GB
-card). The weights hash identifies exactly which adapter would be published;
-the archive hash will change if the model card or NOTICE is edited before it
-is packaged again.
+**Published on 2026-10-30** with that share-alike question stated in the
+release notes and the NOTICE. Anyone redistributing the adapter further should
+read it. The weights hash above is the one in the release; the archive hash
+changes whenever the model card or NOTICE is edited and the package is rebuilt.
 
 ## Data and licensing
 

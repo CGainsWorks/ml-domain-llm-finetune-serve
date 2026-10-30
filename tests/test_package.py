@@ -64,6 +64,18 @@ def test_ships_weights_licence_and_notice_but_not_the_pickle(adapter: Path, tmp_
     assert "README.md" not in names
 
 
+def test_tokenizer_comes_from_the_pinned_base_not_the_package(
+    adapter: Path, tmp_path: Path
+) -> None:
+    m = _package(adapter, tmp_path / "out")
+    names = {f["name"] for f in m["files"]}
+    assert "tokenizer.json" not in names
+    assert "tokenizer_config.json" not in names
+    assert "chat_template.jinja" in names
+    assert m["tokenizer"]["id"] == CFG.model.id
+    assert m["tokenizer"]["revision"] == CFG.model.revision
+
+
 def test_hashes_match_the_files(adapter: Path, tmp_path: Path) -> None:
     out = tmp_path / "out"
     m = _package(adapter, out)

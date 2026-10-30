@@ -6,13 +6,18 @@ pinned base model and nothing else:
 * the adapter weights and config (``base_model_name_or_path`` plus the pinned
   ``revision``, so ``PeftModel.from_pretrained`` fetches the exact base the
   scorecard was measured on);
-* the tokenizer files and chat template the model was trained with;
+* the chat template the model was trained with;
 * the Apache-2.0 licence text and a NOTICE with every attribution the
   licence audit requires;
 * the model card.
 
 What stays out, deliberately:
 
+* The tokenizer files. Training does not change the tokenizer, so the base
+  model's own ``tokenizer.json`` at the pinned revision is the one to load;
+  the manifest says so. A copy re-serialised by a newer ``transformers`` has
+  the same vocabulary and encodings but different bytes, which would only
+  invite the question of which one is authoritative.
 * ``training_args.bin`` is a pickle. Loading it executes code, and it embeds
   the training machine's absolute paths.
 * ``dllm_merge_info.json`` and ``train_summary.json`` also carry absolute
@@ -43,8 +48,6 @@ from dllm.paths import ROOT
 ADAPTER_FILES = (
     "adapter_model.safetensors",
     "adapter_config.json",
-    "tokenizer.json",
-    "tokenizer_config.json",
     "chat_template.jinja",
 )
 OPTIONAL_FILES = frozenset({"chat_template.jinja"})
@@ -187,6 +190,12 @@ def package_adapter(
             "revision": cfg.model.revision,
             "licence": cfg.model.licence,
             "licence_url": cfg.model.licence_url,
+        },
+        "tokenizer": {
+            "source": "base model",
+            "id": cfg.model.id,
+            "revision": cfg.model.revision,
+            "note": "Not shipped. Training does not change the tokenizer; load it from the base model at this revision.",
         },
         "lora": {
             "r": cfg.lora.r,

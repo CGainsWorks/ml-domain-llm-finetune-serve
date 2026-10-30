@@ -8,7 +8,7 @@ Last updated: 2026-10-30
 |---|---|
 | Licence audit | Passes on the default mix; **blocks** the deliberately-registered non-commercial source with exit 1. |
 | Dataset preparation | 78,577 raw rows → 20,000 train / 500 validation / 500 test / 200 guard. 193 unparseable and 86 non-executable gold queries dropped. |
-| Unit tests | 307 pass without torch (what CI's unit-test job runs); 2 more need torch and are skipped there. |
+| Unit tests | 308 pass without torch (what CI's unit-test job runs); 2 more need torch and are skipped there. |
 | **Baseline scorecard** | `evals/results/baseline.json`: 500 + 200 items, 1,690 s on an RTX 4060. |
 | LoRA training | Full 2,500-step run on the 4060. Calibrated at 9.35 samples/s, 4.6 GB peak VRAM. |
 | Resume from checkpoint | Killed and re-run; resumed from `checkpoint-8` and reattached to the **same** MLflow run id. |
@@ -19,7 +19,7 @@ Last updated: 2026-10-30
 | Gateway Docker image | Built and run locally; `/healthz`, `/readyz`, `/metrics` all correct. |
 | Benchmark harness | 26 tests against a stub OpenAI endpoint: SSE parsing, TTFT, percentiles, failure handling. |
 | **CPU serving profile** | vLLM 0.26.0's CPU backend behind the gateway, no GPU. The fine-tuned model gave identical predictions on 50 of 50 holdout items to the committed GPU scorecard ([results.md §8](docs/results.md)). `scripts/cpu_serving_smoke.sh` passed locally against the fine-tuned model and runs in CI against a stand-in model. |
-| Adapter package | `dllm model package` built the release package, manifest and SHA-256 for the adapter behind the committed scorecard. Local only; see In progress. |
+| **Adapter release** | `dllm model package` built the package, manifest and SHA-256 for the adapter behind the committed scorecard, published as release [`adapter-v1`](https://github.com/CGainsWorks/ml-domain-llm-finetune-serve/releases/tag/adapter-v1) on 2026-10-30. Weights SHA-256 `32a6bf05dfdbedf861faec2190bbf70ae021e774b49668752967f282434a208b`. |
 | **End-to-end smoke** | `scripts/run_smoke.sh` runs all 7 stages and asserts the gate blocks the resulting model. Passes locally **and on a clean GitHub Actions runner**. |
 | **CI** | All 6 jobs green on Ubuntu: lint + tests on 3.10 and 3.12, licence audit, config validation, gateway image build plus the CPU serving smoke, end-to-end smoke. |
 
@@ -53,19 +53,14 @@ run since.
 
 ## In progress
 
-- **Publishing the trained adapter.** Packaged locally under the git-ignored
-  `artifacts/release/` with the Apache-2.0 licence, a NOTICE, the model card and
-  a manifest of every file's size and SHA-256 (weights
-  `32a6bf05dfdbedf861faec2190bbf70ae021e774b49668752967f282434a208b`). The
-  base model's licence (Apache-2.0, ungated, pinned revision) permits it.
-  Uploading it as a GitHub release asset is waiting on the owner's decision,
-  including on whether Spider's share-alike term should be read as reaching
-  the weights.
+- Nothing at present. The adapter release states the open question of whether
+  Spider's CC-BY-SA-4.0 share-alike term reaches trained weights; anyone
+  redistributing it further should read the release notes.
 
 ## Not started
 
 - The 7B profile (`configs/rented_a100.yaml`) has never been trained. It does
-  not fit 8 GB and needs the rented card the brief anticipated. It is marked
+  not fit 8 GB and needs a rented data-centre card. It is marked
   `NOT YET RUN` in the file itself.
 - Wiring the gateway to sw-rails-usage-billing. The README shows the event
   mapping and a sketch; no code sends events.
