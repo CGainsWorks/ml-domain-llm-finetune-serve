@@ -257,6 +257,59 @@ checkpoint, so that cost is already inside the reported accuracy.
 
 ---
 
+## 8. CPU serving: same engine, same answers
+
+`configs/serve_cpu.yaml` and `docker-compose.cpu.yml` serve the merged model on
+vLLM 0.26.0's CPU backend (`vllm/vllm-openai-cpu:v0.26.0`) behind the same
+gateway. Measured on 2026-10-30 on the development desktop: x86-64 with AVX2
+and no AVX-512, Docker Desktop on WSL2, vLLM binding 7 OpenMP threads.
+
+**Parity.** The first 50 holdout items, sent through the gateway to the CPU
+profile in float32, against the committed GPU scorecard
+(`evals/results/finetuned.json`, bf16 on the 4060, Hugging Face backend):
+
+| | CPU profile via gateway | Committed GPU run, same 50 items |
+|---|---:|---:|
+| Identical predictions | **50 of 50** | |
+| Correct | 45 | 45 |
+| Wrong result | 4 | 4 |
+| Execution error | 1 | 1 |
+| `exec_acc_nonempty` (46 items) | 0.9130 | 0.9130 |
+
+The exported checkpoint is bf16, so float32 serving computes on exactly the
+same weights at higher precision. Scorecard and per-item records:
+`evals/results/cpu_served_sample.json` and `.records.jsonl`. Fifty items is a
+parity check, not a new accuracy figure; the 500-item numbers in §1 remain the
+reference.
+
+**Latency, float32, weights on a Docker named volume.** Other containers were
+using the same CPU at the time, so these are indicative, not a benchmark:
+
+| | |
+|---|---:|
+| Container start to `/health` OK | 82 s |
+| First request (one-off warm-up) | 80 s |
+| Next requests, 11-token SQL answer | about 4 s each |
+
+The same model on a bind mount from the Windows filesystem took more than 5
+minutes for the first request and 13 to 19 s for the next ones, so on Docker
+Desktop for Windows keep the weights in a named volume or inside WSL.
+
+**bfloat16 does not work on this CPU.** Without AVX-512 BF16 or AMX, vLLM's CPU
+backend logs `Failed to create oneDNN linear, fallback to torch linear` and the
+first forward pass of the 1.5B model ran past vLLM's 300 s execute timeout and
+killed the engine. That happened twice, on a bind mount and on a named volume.
+Hence float32 as the profile default, a 900 s execute timeout for headroom and
+a container health check that only reports healthy after one real completion
+has been served.
+
+**In CI** the same compose files run on a GitHub-hosted runner with a stand-in
+model (`HuggingFaceTB/SmolLM2-135M-Instruct`, Apache-2.0, revision pinned),
+because the fine-tuned weights are not published. That job checks the serving
+path (engine, OpenAI API, auth, rate limit, token accounting), not SQL quality.
+
+---
+
 ## Reproducing
 
 ```bash

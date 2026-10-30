@@ -1,0 +1,75 @@
+{
+  "label": "cpu-served-sample",
+  "created_at": "2026-10-30T09:07:53+00:00",
+  "tasks": {
+    "sql_exec_holdout": {
+      "task_id": "sql_exec_holdout",
+      "n": 50,
+      "metrics": {
+        "exec_acc_nonempty": 0.913043,
+        "exec_acc": 0.9,
+        "schema_adherence": 1.0,
+        "valid_sql_rate": 1.0,
+        "exact_match_norm": 0.8,
+        "exec_error_rate": 0.02,
+        "unparseable_rate": 0.0
+      },
+      "counts": {
+        "correct": 45,
+        "wrong": 4,
+        "unparseable": 0,
+        "not_read_only": 0,
+        "exec_error": 1,
+        "gold_unexecutable": 0,
+        "gold_nonempty": 46,
+        "correct_nonempty": 42,
+        "scorable": 50
+      }
+    }
+  },
+  "metrics": {
+    "sql_exec_holdout.exec_acc_nonempty": 0.913043,
+    "sql_exec_holdout.exec_acc": 0.9,
+    "sql_exec_holdout.schema_adherence": 1.0,
+    "sql_exec_holdout.valid_sql_rate": 1.0,
+    "sql_exec_holdout.exact_match_norm": 0.8,
+    "sql_exec_holdout.exec_error_rate": 0.02,
+    "sql_exec_holdout.unparseable_rate": 0.0
+  },
+  "backend": {
+    "backend": "openai",
+    "base_url": "http://localhost:18081/v1",
+    "model": "domain-sql",
+    "concurrency": 8
+  },
+  "generation": {
+    "max_new_tokens": 160,
+    "temperature": 0.0,
+    "top_p": 1.0,
+    "stop": [
+      "\n\n",
+      "```",
+      ";"
+    ],
+    "seed": 1337
+  },
+  "prompt_versions": {
+    "sql": "sql_v1",
+    "guard": "guard_v1"
+  },
+  "dataset_fingerprint": {
+    "sql_exec_holdout": {
+      "n": 50,
+      "items_sha256_16": "b6eb4cecc3220be7",
+      "dataset": "data/processed/test.jsonl",
+      "generation_seconds": 340.87
+    }
+  },
+  "runtime_s": 341.48,
+  "git_commit": "fcafa77",
+  "env": {
+    "python": "3.12.0",
+    "platform": "Windows-11-10.0.26200-SP0"
+  },
+  "schema_version": 1
+}
