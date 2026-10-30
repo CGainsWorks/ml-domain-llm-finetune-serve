@@ -1,6 +1,6 @@
 # Status
 
-Last updated: 2026-08-10
+Last updated: 2026-10-30
 
 ## Verified by running it
 
@@ -8,18 +8,20 @@ Last updated: 2026-08-10
 |---|---|
 | Licence audit | Passes on the default mix; **blocks** the deliberately-registered non-commercial source with exit 1. |
 | Dataset preparation | 78,577 raw rows → 20,000 train / 500 validation / 500 test / 200 guard. 193 unparseable and 86 non-executable gold queries dropped. |
-| Eval harness | 275 unit tests. Run against the real base model three times. |
-| **Baseline scorecard** | `evals/results/baseline.json` — 500 + 200 items, 1,690 s on an RTX 4060. |
+| Unit tests | 307 pass without torch (what CI's unit-test job runs); 2 more need torch and are skipped there. |
+| **Baseline scorecard** | `evals/results/baseline.json`: 500 + 200 items, 1,690 s on an RTX 4060. |
 | LoRA training | Full 2,500-step run on the 4060. Calibrated at 9.35 samples/s, 4.6 GB peak VRAM. |
 | Resume from checkpoint | Killed and re-run; resumed from `checkpoint-8` and reattached to the **same** MLflow run id. |
 | Adapter merge | Merged and verified against adapter-on-base outputs before export. |
 | Promotion gate | Blocks a candidate equal to the baseline (delta 0 < required 0.05), exit 1, report naming the failing check. |
-| MLflow registry | `registry promote` registered version 1, tagged it `blocked`, and left `deployment_target` **unset**. Verified via the client. |
-| FastAPI gateway | 17 HTTP tests plus the real container: 401 no token, 401 wrong token, 502 valid token (auth passed, upstream absent), 400 disallowed model, 503 with no keys configured. Runs as uid 10001, not root. |
+| MLflow registry | `registry promote` registered version 1, tagged it `blocked` and left `deployment_target` **unset**. Verified via the client. |
+| FastAPI gateway | 24 HTTP tests plus the real container: 401 no token, 401 wrong token, 502 valid token (auth passed, upstream absent), 400 disallowed model, 503 with no keys configured, per-key token counters including streamed usage. Runs as uid 10001, not root. |
 | Gateway Docker image | Built and run locally; `/healthz`, `/readyz`, `/metrics` all correct. |
-| Benchmark harness | 15 tests against a stub OpenAI endpoint: SSE parsing, TTFT, percentiles, failure handling. |
+| Benchmark harness | 26 tests against a stub OpenAI endpoint: SSE parsing, TTFT, percentiles, failure handling. |
+| **CPU serving profile** | vLLM 0.26.0's CPU backend behind the gateway, no GPU. The fine-tuned model gave identical predictions on 50 of 50 holdout items to the committed GPU scorecard ([results.md §8](docs/results.md)). `scripts/cpu_serving_smoke.sh` passed locally against the fine-tuned model and runs in CI against a stand-in model. |
+| Adapter package | `dllm model package` built the release package, manifest and SHA-256 for the adapter behind the committed scorecard. Local only; see In progress. |
 | **End-to-end smoke** | `scripts/run_smoke.sh` runs all 7 stages and asserts the gate blocks the resulting model. Passes locally **and on a clean GitHub Actions runner**. |
-| **CI** | All 6 jobs green on Ubuntu: lint + tests on 3.10 and 3.12, licence audit, config validation, image build, end-to-end smoke. |
+| **CI** | All 6 jobs green on Ubuntu: lint + tests on 3.10 and 3.12, licence audit, config validation, gateway image build plus the CPU serving smoke, end-to-end smoke. |
 
 ## Complete
 
@@ -30,21 +32,58 @@ evaluated, gated, registered, served and benchmarked.
 - **Gate: PROMOTE.** Registered as `domain-sql` v1, `deployment_target` moved.
 - **Training: 1.149 GPU-hours measured**, against a 1.19 h calibration.
 - **Serving: 1,199.6 output tokens/s peak** at concurrency 32, zero failures,
-  real vLLM 0.26.0 behind the gateway.
+  real vLLM 0.26.0 behind the gateway. The `make bench` run that fills
+  [results.md §4](docs/results.md) is done (`evals/results/bench_rtx4060.json`).
+- **CPU serving profile** (`configs/serve_cpu.yaml`, `docker-compose.cpu.yml`):
+  same engine, same API, no GPU, exercised in CI on every push.
+- **Per-key token accounting** on `/metrics`, and a documented route for
+  sending it to sw-rails-usage-billing as metered usage (README).
 
 Numbers and their caveats: [docs/results.md](docs/results.md).
 
-`.github/workflows/train.yml` has also been executed, on a self-hosted
-ephemeral runner backed by the same RTX 4060: full 2,500-step run, merge, eval,
-and the gate scoring the artifact the training job produced. Both jobs green.
-That run and the manual one agree to ±0.002 — see
+`.github/workflows/train.yml` has been executed once, on 2026-08-10, on a
+self-hosted ephemeral runner backed by the same RTX 4060: full 2,500-step run,
+merge, eval and the gate scoring the artefact the training job produced. Both
+jobs were green. That run and the manual one agree to ±0.002; see
 [results.md §6](docs/results.md) for what that says about the gate threshold.
+The Actions log of that run is gone, because the repository was recreated on
+2026-10-15; the numbers in results.md §6 and the commit that recorded them are
+the remaining evidence. It cannot run on GitHub-hosted runners, so it has not
+run since.
 
-## Not done
+## In progress
+
+- **Publishing the trained adapter.** Packaged locally under the git-ignored
+  `artifacts/release/` with the Apache-2.0 licence, a NOTICE, the model card and
+  a manifest of every file's size and SHA-256 (weights
+  `32a6bf05dfdbedf861faec2190bbf70ae021e774b49668752967f282434a208b`). The
+  base model's licence (Apache-2.0, ungated, pinned revision) permits it.
+  Uploading it as a GitHub release asset is waiting on the owner's decision,
+  including on whether Spider's share-alike term should be read as reaching
+  the weights.
+
+## Not started
 
 - The 7B profile (`configs/rented_a100.yaml`) has never been trained. It does
   not fit 8 GB and needs the rented card the brief anticipated. It is marked
   `NOT YET RUN` in the file itself.
+- Wiring the gateway to sw-rails-usage-billing. The README shows the event
+  mapping and a sketch; no code sends events.
+- A multi-table or schema-retrieval eval. The holdout is single-table WikiSQL
+  style, which is what a buyer will discount.
+
+## Limitations
+
+- Rate-limit buckets are in-process, so N gateway replicas enforce N times the
+  limit. Correct for one replica; horizontal scale needs Redis.
+- CPU serving is a functional fallback, not a capacity plan: about 4 s for an
+  11-token answer on an AVX2 desktop in float32, after an 80 s first request.
+  bfloat16 on CPU needs AVX-512 BF16 or AMX and is untested.
+- CI's CPU serving check uses a stand-in model, so it proves the serving path,
+  not SQL quality. The parity check against the fine-tuned model was run
+  locally.
+- Streamed responses are counted towards per-key tokens only when the client
+  asks for `stream_options.include_usage`.
 
 ### vLLM on Windows: it does run
 
@@ -59,8 +98,8 @@ docker run --rm --gpus all nvidia/cuda:12.6.0-base-ubuntu22.04 nvidia-smi
 -> NVIDIA GeForce RTX 4060, 8188 MiB
 ```
 
-No substitute inference server is needed, and none is used: the benchmarks will
-measure the same vLLM that `docker compose up` runs in production.
+No substitute inference server is used on the GPU path: the benchmarks measure
+the same vLLM that `docker compose up` runs in production.
 
 ## What running it actually caught
 
@@ -101,7 +140,7 @@ against it. They are listed because the list is the argument for doing so.
     decoded greedy text, which is chaotic in the logits. Its replacement then
     compared fp32 against bf16 and blamed the merge for the cast. Merge fidelity
     and export precision are now measured separately: 1.000000 and 0.962025.
-12. **vLLM would not start under WSL2** — `RuntimeError: UVA is not available`,
+12. **vLLM would not start under WSL2**: `RuntimeError: UVA is not available`,
     which names neither WSL2 nor the cause. vLLM disables pinned host memory on
     WSL2 by default and its UVA probe is just `is_pin_memory_available()`.
     `VLLM_WSL2_ENABLE_PIN_MEMORY=1` fixes it.
@@ -114,7 +153,7 @@ against it. They are listed because the list is the argument for doing so.
     *previous* model while looking like it gated the new one. Now verified
     fixed: the gate reported 0.8954 where the committed scorecard says 0.8932.
 15. **`shell: bash` was WSL's bash**, not Git Bash, on a Windows runner. It
-    mangled the script path into `C:Usersuser...` and failed with a
+    mangled the script path into `C:Users<user>...` and failed with a
     "No such file" that pointed nowhere near the cause.
 16. **Neither Python on the runner's PATH was usable**: `python3` was the
     Microsoft Store stub (exists, refuses to run) and `python` was 3.9, below
@@ -123,9 +162,17 @@ against it. They are listed because the list is the argument for doing so.
 17. **`actions/setup-python` needs administrator rights** (it writes to HKLM),
     which a self-hosted runner should not have. It is now best-effort with a
     validated fallback.
-
-## Next steps
-
-1. Bring up `docker compose` on a CUDA host and run `make bench` to fill in
-   `docs/results.md` §4.
-2. Flip the repository to public and add the URL to the CV bullet.
+18. **bfloat16 on an AVX2-only CPU killed the vLLM engine.** The CPU backend
+    cannot build a oneDNN bf16 matmul without AVX-512 BF16 or AMX, falls back
+    to plain torch, and the first forward pass of the 1.5B model ran past
+    vLLM's 300 s execute timeout. The container stayed "healthy" on `/health`
+    throughout. The CPU profile now defaults to float32, raises the timeout and
+    only reports healthy after serving one real completion.
+19. **`COMPOSE_FILE` with a colon fails on Windows.** Compose splits it on `;`
+    there and looked for a file literally named
+    `docker-compose.yml:docker-compose.cpu.yml`. `COMPOSE_PATH_SEPARATOR=:`
+    is now set wherever the CPU profile is selected.
+20. **A `.env` written for the GPU would have broken the CPU profile.** The
+    GPU's `GPU_MEMORY_UTILIZATION=0.85` means 85% of host RAM on the CPU
+    backend, which refuses to start. The CPU profile reads its own `CPU_*`
+    variables instead.
