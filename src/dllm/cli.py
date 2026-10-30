@@ -289,6 +289,40 @@ def model_merge(
     typer.echo(json.dumps(info, indent=2, default=str))
 
 
+@model_app.command("package")
+def model_package(
+    config: str = ConfigOpt,
+    set_: list[str] = SetOpt,
+    adapter: str = typer.Option(
+        None, help="LoRA adapter directory. Defaults to the config's own output directory."
+    ),
+    out: str = typer.Option("artifacts/release", help="Output directory (git-ignored)."),
+    name: str = typer.Option("domain-sql-lora", help="Package name."),
+    version: str = typer.Option("v1", help="Package version."),
+    scorecard: str = typer.Option(
+        "evals/results/finetuned.json", help="Scorecard this adapter produced."
+    ),
+) -> None:
+    """Package an adapter for release: files, licence, NOTICE, manifest, archive.
+
+    Writes locally only. Uploading it anywhere is a separate decision.
+    """
+    from dllm.merge.package import package_adapter
+
+    cfg = load_config(config, set_)
+    adapter_dir = Path(adapter) if adapter else ROOT / cfg.resolved_output_dir() / "adapter"
+    manifest = package_adapter(
+        cfg,
+        adapter_dir=adapter_dir,
+        out_dir=Path(out),
+        name=name,
+        version=version,
+        scorecard=Path(scorecard),
+        train_summary=adapter_dir.parent / "train_summary.json",
+    )
+    typer.echo(json.dumps(manifest, indent=2))
+
+
 # --------------------------------------------------------------------------- #
 # registry
 # --------------------------------------------------------------------------- #

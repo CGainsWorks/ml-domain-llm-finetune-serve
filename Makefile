@@ -16,8 +16,9 @@ DLLM   := $(PYTHON) -m dllm.cli
 
 .DEFAULT_GOAL := help
 .PHONY: help setup setup-cpu lint fmt test test-fast smoke audit data card \
-        estimate baseline train merge eval gate compare promote serve-vllm \
-        serve-gateway bench demo docker-build docker-up docker-down clean
+        estimate baseline train merge eval gate compare promote package \
+        serve-vllm serve-vllm-cpu serve-gateway bench demo demo-cpu \
+        smoke-serve-cpu docker-build docker-up docker-down clean
 
 help:  ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
@@ -82,6 +83,9 @@ compare:  ## Write docs/results.md
 	$(DLLM) eval compare --baseline evals/results/baseline.json \
 	  --candidate evals/results/$(LABEL).json
 
+package:  ## Package the adapter with licence, NOTICE and SHA-256 manifest (local only)
+	$(DLLM) model package --config $(CONFIG)
+
 promote:  ## Register in MLflow and promote only if the gate passes
 	$(DLLM) registry promote --config $(CONFIG) \
 	  --candidate evals/results/$(LABEL).json --model-dir artifacts/merged/current
@@ -89,6 +93,9 @@ promote:  ## Register in MLflow and promote only if the gate passes
 # --- serving -------------------------------------------------------------- #
 serve-vllm:  ## Run vLLM directly (needs CUDA)
 	$(DLLM) serve vllm --config $(CONFIG)
+
+serve-vllm-cpu:  ## Run vLLM on its CPU backend (needs vLLM's CPU build)
+	$(DLLM) serve vllm --config configs/serve_cpu.yaml
 
 serve-gateway:  ## Run the authenticated FastAPI gateway
 	$(DLLM) serve gateway --config $(CONFIG)
@@ -102,6 +109,13 @@ smoke:  ## Whole pipeline end to end on CPU in a couple of minutes. What CI runs
 
 demo:  ## Serve the model and run the benchmark, in containers
 	docker compose up --build
+
+demo-cpu:  ## Serve the model on CPU in containers: no NVIDIA GPU needed
+	COMPOSE_PATH_SEPARATOR=: COMPOSE_FILE=docker-compose.yml:docker-compose.cpu.yml \
+	  docker compose up --build
+
+smoke-serve-cpu:  ## CPU serving profile end to end through the gateway (what CI runs)
+	bash scripts/cpu_serving_smoke.sh
 
 docker-build:
 	docker compose build
