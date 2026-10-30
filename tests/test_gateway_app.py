@@ -18,7 +18,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from dllm.config import GatewayConfig
-from dllm.serve.gateway.app import _prompt_chars, create_app
+from dllm.serve.gateway.app import _prompt_chars, _SseUsageScanner, create_app
 from dllm.serve.gateway.auth import mint_keys
 
 CHAT_BODY = {
@@ -218,3 +218,107 @@ class TestPromptSizing:
 
     def test_empty(self) -> None:
         assert _prompt_chars({}) == 0
+
+
+SSE_WITH_USAGE = (
+    b'data: {"choices":[{"delta":{"content":"SELECT"}}]}\n\n'
+    b'data: {"choices":[{"delta":{"content":" 1"}}]}\n\n'
+    b'data: {"choices":[],"usage":{"prompt_tokens":12,"completion_tokens":3,"total_tokens":15}}\n\n'
+    b"data: [DONE]\n\n"
+)
+
+
+def streaming_handler(request: httpx.Request) -> httpx.Response:
+    body = json.loads(request.content)
+    if body.get("stream"):
+        return httpx.Response(
+            200, content=SSE_WITH_USAGE, headers={"Content-Type": "text/event-stream"}
+        )
+    return upstream_handler(request)
+
+
+def token_samples(metrics_text: str, key_id: str) -> dict[str, float]:
+    """``{kind: value}`` for one key from the Prometheus exposition text."""
+    out: dict[str, float] = {}
+    for line in metrics_text.splitlines():
+        if line.startswith("dllm_gateway_tokens_total{") and f'key_id="{key_id}"' in line:
+            kind = line.split('kind="', 1)[1].split('"', 1)[0]
+            out[kind] = float(line.rsplit(" ", 1)[1])
+    return out
+
+
+class TestTokenAccounting:
+    """Per-key token counters: what a usage-based bill would be built from."""
+
+    @pytest.fixture
+    def two_keys(self, monkeypatch: pytest.MonkeyPatch):
+        entries = mint_keys(2)
+        monkeypatch.setenv(
+            "DLLM_GATEWAY_KEYS",
+            json.dumps([{k: v for k, v in e.items() if k != "key"} for e in entries]),
+        )
+        app = create_app(GatewayConfig(rate_limit_rpm=600, rate_limit_burst=50))
+        with TestClient(app) as client:
+            app.state.client = httpx.AsyncClient(
+                transport=httpx.MockTransport(streaming_handler),
+                base_url="http://upstream/v1",
+            )
+            yield client, entries
+
+    def test_counts_reported_usage_per_key(self, two_keys) -> None:
+        client, (a, b) = two_keys
+        auth_a = {"Authorization": f"Bearer {a['key']}"}
+        for _ in range(3):
+            assert client.post("/v1/chat/completions", json=CHAT_BODY, headers=auth_a).is_success
+        text = client.get("/metrics").text
+        # The mocked upstream reports 10 prompt and 5 completion tokens a call.
+        assert token_samples(text, a["key_id"]) == {"prompt": 30.0, "completion": 15.0}
+        assert token_samples(text, b["key_id"]) == {}
+
+    def test_rejected_requests_are_not_counted(self, two_keys) -> None:
+        client, (a, _) = two_keys
+        client.post(
+            "/v1/chat/completions",
+            json={**CHAT_BODY, "model": "gpt-4"},
+            headers={"Authorization": f"Bearer {a['key']}"},
+        )
+        assert token_samples(client.get("/metrics").text, a["key_id"]) == {}
+
+    def test_streaming_usage_is_counted_when_present(self, two_keys) -> None:
+        client, (a, _) = two_keys
+        r = client.post(
+            "/v1/chat/completions",
+            json={**CHAT_BODY, "stream": True, "stream_options": {"include_usage": True}},
+            headers={"Authorization": f"Bearer {a['key']}"},
+        )
+        assert r.status_code == 200
+        assert r.content == SSE_WITH_USAGE, "the stream must pass through unchanged"
+        text = client.get("/metrics").text
+        assert token_samples(text, a["key_id"]) == {"prompt": 12.0, "completion": 3.0}
+
+    def test_secret_never_appears_in_metrics(self, two_keys) -> None:
+        client, (a, _) = two_keys
+        client.post(
+            "/v1/chat/completions", json=CHAT_BODY, headers={"Authorization": f"Bearer {a['key']}"}
+        )
+        text = client.get("/metrics").text
+        assert a["key"] not in text
+        assert a["key_hash"] not in text
+
+
+class TestSseUsageScanner:
+    def test_usage_split_across_chunks(self) -> None:
+        scan = _SseUsageScanner()
+        for i in range(0, len(SSE_WITH_USAGE), 7):
+            scan.feed(SSE_WITH_USAGE[i : i + 7])
+        assert scan.usage == {"prompt_tokens": 12, "completion_tokens": 3, "total_tokens": 15}
+
+    def test_no_usage_chunk(self) -> None:
+        scan = _SseUsageScanner()
+        scan.feed(b'data: {"choices":[]}\n\ndata: [DONE]\n\n')
+        assert scan.usage is None
+
+    def test_malformed_line_is_ignored(self) -> None:
+        scan = _SseUsageScanner()
+        scan.feed(b'data: {"usage": nope\n\n')
+        assert scan.usage is None

@@ -15,6 +15,13 @@ What it adds:
   * ``/healthz`` (is the gateway up) and ``/readyz`` (is the model up), which
     are different questions and need different answers for a load balancer.
   * Prometheus metrics, and a request id on every response for correlation.
+  * Per-key prompt and completion token counters
+    (``dllm_gateway_tokens_total{key_id, kind}``), taken from the usage the
+    model server reports. Streamed responses are counted when the client asks
+    for ``stream_options.include_usage``; otherwise vLLM sends no usage.
+
+The upstream can be vLLM on CUDA or vLLM's CPU backend (configs/serve_cpu.yaml);
+the gateway cannot tell the difference and does not need to.
 """
 
 from __future__ import annotations
@@ -65,6 +72,14 @@ def _metrics():
             "dllm_gateway_rejected_total",
             "Rejected requests by reason",
             ["reason"],
+            registry=registry,
+        ),
+        # Per-key token accounting: the numbers a usage-based bill is made of.
+        # key_id is the public half of a key record, never the secret.
+        "tokens": Counter(
+            "dllm_gateway_tokens_total",
+            "Tokens served, as reported by the model server, by API key and kind",
+            ["key_id", "kind"],
             registry=registry,
         ),
         "latency": Histogram(
@@ -181,6 +196,12 @@ def create_app(cfg: GatewayConfig) -> FastAPI:
     async def completions(request: Request, key: ApiKey = Depends(require_key)):
         return await _proxy(request, key, "/completions")
 
+    def _count_tokens(key_id: str, usage: dict | None) -> None:
+        for kind in ("prompt", "completion"):
+            n = (usage or {}).get(f"{kind}_tokens")
+            if isinstance(n, int) and n > 0:
+                metrics["tokens"].labels(key_id=key_id, kind=kind).inc(n)
+
     async def _proxy(request: Request, key: ApiKey, upstream_path: str):
         started = time.perf_counter()
         request_id = str(uuid.uuid4())
@@ -242,6 +263,7 @@ def create_app(cfg: GatewayConfig) -> FastAPI:
         if streaming:
 
             async def stream() -> AsyncIterator[bytes]:
+                usage_scan = _SseUsageScanner()
                 async with client.stream("POST", upstream_path, json=payload) as upstream:
                     if upstream.status_code >= 400:
                         body = await upstream.aread()
@@ -251,7 +273,11 @@ def create_app(cfg: GatewayConfig) -> FastAPI:
                         yield body
                         return
                     async for chunk in upstream.aiter_bytes():
+                        usage_scan.feed(chunk)
                         yield chunk
+                # Only present when the client asked for
+                # stream_options.include_usage; otherwise nothing is counted.
+                _count_tokens(key.key_id, usage_scan.usage)
                 metrics["requests"].labels(route=upstream_path, status="200").inc()
                 metrics["latency"].labels(route=upstream_path).observe(
                     time.perf_counter() - started
@@ -277,6 +303,8 @@ def create_app(cfg: GatewayConfig) -> FastAPI:
         # Refund the difference between the estimate and what was actually used,
         # so a caller asking for max_tokens=2000 and getting 30 is not punished.
         usage = body.get("usage") or {}
+        if upstream.status_code < 400:
+            _count_tokens(key.key_id, usage)
         actual = usage.get("total_tokens")
         if isinstance(actual, int) and actual < estimated:
             await limiter.refund_tokens(key.key_id, estimated - actual)
@@ -309,3 +337,31 @@ def _prompt_chars(payload: dict) -> int:
     if isinstance(prompt, list):
         return sum(len(str(p)) for p in prompt)
     return len(str(prompt))
+
+
+class _SseUsageScanner:
+    """Pick the ``usage`` object out of an OpenAI-style SSE stream in passing.
+
+    Chunks arrive at arbitrary byte boundaries, so lines are reassembled before
+    parsing. Only lines that mention ``"usage"`` are decoded, which keeps the
+    per-chunk cost to a substring search.
+    """
+
+    def __init__(self) -> None:
+        self._pending = b""
+        self.usage: dict | None = None
+
+    def feed(self, chunk: bytes) -> None:
+        lines = (self._pending + chunk).split(b"\n")
+        self._pending = lines.pop()
+        for line in lines:
+            line = line.strip()
+            if not line.startswith(b"data:") or b'"usage"' not in line:
+                continue
+            try:
+                event = json.loads(line[5:].strip())
+            except (json.JSONDecodeError, UnicodeDecodeError):
+                continue
+            usage = event.get("usage") if isinstance(event, dict) else None
+            if isinstance(usage, dict):
+                self.usage = usage
