@@ -8,6 +8,7 @@ only exists as Python kwargs is one you cannot reproduce from a shell.
 from __future__ import annotations
 
 import logging
+import os
 import shutil
 import subprocess
 import sys
@@ -56,14 +57,34 @@ def build_command(cfg: VllmConfig) -> list[str]:
         # Every request in this domain repeats the same system prompt and often
         # the same schema, so prefix caching is a large, free throughput win.
         cmd.append("--enable-prefix-caching")
+    if cfg.enforce_eager:
+        cmd.append("--enforce-eager")
     cmd.extend(cfg.extra_args)
     return cmd
 
 
+def build_env(cfg: VllmConfig) -> dict[str, str]:
+    """Environment variables the server needs on top of the caller's.
+
+    Only the CPU backend needs any: its KV cache size and its per-step timeout
+    are environment variables rather than flags.
+    """
+    env: dict[str, str] = {}
+    if cfg.device == "cpu":
+        if cfg.cpu_kvcache_space_gib is not None:
+            env["VLLM_CPU_KVCACHE_SPACE"] = str(cfg.cpu_kvcache_space_gib)
+        if cfg.cpu_execute_timeout_s is not None:
+            env["VLLM_EXECUTE_MODEL_TIMEOUT_SECONDS"] = str(cfg.cpu_execute_timeout_s)
+    return env
+
+
 def launch(cfg: VllmConfig) -> int:
     """Run the server in the foreground. Returns its exit code."""
-    if shutil.which("nvidia-smi") is None:
-        log.warning("no nvidia-smi found; vLLM requires a CUDA device and will likely fail")
+    if cfg.device == "cuda" and shutil.which("nvidia-smi") is None:
+        log.warning(
+            "no nvidia-smi found; serve.vllm.device=cuda needs an NVIDIA GPU. "
+            "Use configs/serve_cpu.yaml for the CPU backend."
+        )
 
     model_path = resolve_model_path(cfg)
     if not Path(model_path).is_dir() and "/" not in model_path:
@@ -73,5 +94,6 @@ def launch(cfg: VllmConfig) -> int:
         )
 
     cmd = build_command(cfg)
-    log.info("launching: %s", " ".join(cmd))
-    return subprocess.call(cmd)
+    env = build_env(cfg)
+    log.info("launching (%s): %s", cfg.device, " ".join(cmd))
+    return subprocess.call(cmd, env={**os.environ, **env})

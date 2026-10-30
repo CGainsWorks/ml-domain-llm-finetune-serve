@@ -1,0 +1,41 @@
+# CPU serving profile: the same merged model, the same gateway and the same
+# OpenAI-compatible API, on a host with no NVIDIA GPU.
+#
+# The engine is still vLLM, on its CPU backend (the official
+# vllm/vllm-openai-cpu image, pinned to the same v0.26.0 as the GPU image), so
+# switching profile changes the hardware and nothing a client can see.
+#
+# Containers: set COMPOSE_FILE=docker-compose.yml:docker-compose.cpu.yml (see
+# .env.example). Bare metal: dllm serve vllm --config configs/serve_cpu.yaml,
+# which needs vLLM's CPU build installed. A test keeps this file and
+# docker-compose.cpu.yml in step.
+#
+# Expect it to be slow. A 1.5B model on a desktop CPU is a functional
+# fallback for development, demos and CI, not a capacity plan.
+
+_base_: base.yaml
+
+serve:
+  vllm:
+    device: cpu
+    # float32, not bfloat16. On x86 without AVX-512 BF16 or AMX (most
+    # desktops and GitHub's hosted runners), vLLM 0.26's CPU backend cannot
+    # build a oneDNN bf16 matmul, falls back to plain torch, and the first
+    # forward pass of the 1.5B model ran past vLLM's execute timeout and killed
+    # the engine. float32 served it normally. See docs/results.md section 8.
+    dtype: float32
+    # On CPU this is the fraction of HOST RAM vLLM may claim. The default 0.92
+    # refuses to start on any machine that is also running something else.
+    gpu_memory_utilization: 0.3
+    cpu_kvcache_space_gib: 2
+    # vLLM kills the engine if one forward pass exceeds this (default 300 s).
+    # The first pass on CPU is much slower than the rest.
+    cpu_execute_timeout_s: 900
+    max_num_seqs: 8
+    max_model_len: 2048
+    # torch.compile of the model graph took 4 to 5 minutes on CPU before the
+    # first request could be served. Eager mode starts in about a minute.
+    enforce_eager: true
+  gateway:
+    # CPU decode is far slower than the GPU path; let long generations finish.
+    request_timeout_s: 300.0

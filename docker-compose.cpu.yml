@@ -1,0 +1,71 @@
+# CPU serving profile. Layered on docker-compose.yml, never used alone:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.cpu.yml up --build
+#
+# or set it once in .env so plain `docker compose up` picks it:
+#
+#   COMPOSE_FILE=docker-compose.yml:docker-compose.cpu.yml
+#
+# Same service names, same gateway, same OpenAI-compatible API and the same
+# served model name. What changes is the engine build: vLLM's own CPU backend
+# (the official vllm/vllm-openai-cpu image, pinned to v0.26.0 like the GPU
+# image) instead of the CUDA one, and no GPU reservation. The values mirror
+# configs/serve_cpu.yaml, and tests/test_estimate_and_launcher.py fails if the
+# two drift apart.
+#
+# Needs Docker Compose 2.24 or later for the !reset tag.
+
+services:
+  vllm:
+    build:
+      args:
+        VLLM_IMAGE: vllm/vllm-openai-cpu:v0.26.0
+    image: dllm-vllm-cpu:0.1.0
+    environment:
+      # CPU_* names, not the GPU profile's DTYPE / GPU_MEMORY_UTILIZATION /
+      # MAX_NUM_SEQS, so a .env written for the GPU cannot leak values into
+      # this profile that make it refuse to start.
+      #
+      # float32, not bfloat16: on x86 without AVX-512 BF16 or AMX, vLLM 0.26's
+      # CPU backend cannot build a oneDNN bf16 matmul ("Failed to create oneDNN
+      # linear, fallback to torch linear") and the first forward pass of the
+      # 1.5B model then ran past vLLM's 300 s execute timeout and killed the
+      # engine, twice. float32 served the same model normally. On a CPU with
+      # AVX-512 BF16 or AMX, CPU_DTYPE=bfloat16 halves the memory (not tested
+      # here).
+      DTYPE: ${CPU_DTYPE:-float32}
+      # On the CPU backend this is the fraction of host RAM vLLM may claim.
+      GPU_MEMORY_UTILIZATION: ${CPU_MEMORY_FRACTION:-0.3}
+      MAX_NUM_SEQS: ${CPU_MAX_NUM_SEQS:-8}
+      MAX_MODEL_LEN: ${CPU_MAX_MODEL_LEN:-2048}
+      # GiB of host RAM for the KV cache.
+      VLLM_CPU_KVCACHE_SPACE: ${CPU_KVCACHE_GIB:-2}
+      # Skips a torch.compile that took 4 to 5 minutes on CPU before the first
+      # request could be served.
+      EXTRA_ARGS: ${CPU_EXTRA_ARGS:---enforce-eager}
+      # Headroom for the slow first forward pass. vLLM's default of 300 s
+      # kills the engine rather than waiting.
+      VLLM_EXECUTE_MODEL_TIMEOUT_SECONDS: ${CPU_EXECUTE_TIMEOUT_S:-900}
+      # Healthy means "has answered a request", not just "HTTP is up".
+      WARMUP_ON_HEALTHCHECK: "1"
+    healthcheck:
+      test: ["CMD", "dllm-vllm-health"]
+      interval: 15s
+      timeout: 900s
+      start_period: 180s
+      retries: 20
+    # No GPU. Without this reset the inherited nvidia reservation makes the
+    # container refuse to start on a host without the NVIDIA runtime.
+    deploy: !reset {}
+
+  gateway:
+    command:
+      - python
+      - -m
+      - dllm.cli
+      - serve
+      - gateway
+      - --config
+      - configs/serve_cpu.yaml
+      - --set
+      - serve.gateway.upstream_base_url=http://vllm:8000/v1

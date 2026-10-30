@@ -12,7 +12,7 @@ import pytest
 
 from dllm.config import load_config
 from dllm.paths import CONFIGS
-from dllm.serve.vllm_launcher import build_command
+from dllm.serve.vllm_launcher import build_command, build_env
 from dllm.train.estimate import GpuSpec, estimate, load_gpus, training_length
 
 BASE = load_config(CONFIGS / "base.yaml")
@@ -127,3 +127,77 @@ class TestVllmCommand:
     def test_hub_id_is_passed_through_unchanged(self) -> None:
         cfg = load_config(CONFIGS / "base.yaml", ["serve.vllm.model=Qwen/Qwen2.5-1.5B-Instruct"])
         assert "Qwen/Qwen2.5-1.5B-Instruct" in build_command(cfg.serve.vllm)
+
+
+class TestCpuProfile:
+    """configs/serve_cpu.yaml: the same server, on vLLM's CPU backend."""
+
+    CPU = load_config(CONFIGS / "serve_cpu.yaml")
+
+    def test_selects_the_cpu_backend(self) -> None:
+        assert self.CPU.serve.vllm.device == "cpu"
+        assert BASE.serve.vllm.device == "cuda"
+
+    def test_serves_the_same_model_under_the_same_name(self) -> None:
+        # The gateway allowlist and every client depend on the served name, so
+        # switching profile must not change it.
+        assert self.CPU.serve.vllm.served_model_name == BASE.serve.vllm.served_model_name
+        assert self.CPU.serve.vllm.model == BASE.serve.vllm.model
+        assert self.CPU.serve.gateway.allowed_models == BASE.serve.gateway.allowed_models
+
+    def test_kv_cache_is_sized_by_environment(self) -> None:
+        v = self.CPU.serve.vllm
+        assert build_env(v) == {
+            "VLLM_CPU_KVCACHE_SPACE": str(v.cpu_kvcache_space_gib),
+            "VLLM_EXECUTE_MODEL_TIMEOUT_SECONDS": str(v.cpu_execute_timeout_s),
+        }
+        assert build_env(BASE.serve.vllm) == {}
+
+    def test_enforce_eager_toggles(self) -> None:
+        assert "--enforce-eager" in build_command(self.CPU.serve.vllm)
+        assert "--enforce-eager" not in build_command(BASE.serve.vllm)
+
+    @pytest.mark.parametrize("field", ["cpu_kvcache_space_gib", "cpu_execute_timeout_s"])
+    def test_cpu_only_fields_are_rejected_on_cuda(self, field: str) -> None:
+        with pytest.raises(ValueError, match="only applies to device: cpu"):
+            load_config(CONFIGS / "base.yaml", [f"serve.vllm.{field}=4"])
+
+    def test_cpu_profile_uses_float32(self) -> None:
+        # bf16 on an AVX2-only CPU killed the engine; see configs/serve_cpu.yaml.
+        assert self.CPU.serve.vllm.dtype == "float32"
+
+    def test_compose_override_matches_the_config(self) -> None:
+        """docker-compose.cpu.yml must say what configs/serve_cpu.yaml says.
+
+        The container path reads environment variables, the bare-metal path
+        reads the YAML. Two sources for one profile drift unless something
+        compares them.
+        """
+        import yaml
+
+        class _Loader(yaml.SafeLoader):
+            pass
+
+        # Compose's !reset tag clears an inherited value; YAML itself has no
+        # opinion on it, so read it as an empty marker.
+        _Loader.add_constructor("!reset", lambda loader, node: None)
+        compose = yaml.load(
+            (CONFIGS.parent / "docker-compose.cpu.yml").read_text(encoding="utf-8"),
+            Loader=_Loader,
+        )
+        svc = compose["services"]["vllm"]
+        env = svc["environment"]
+        v = self.CPU.serve.vllm
+
+        def default(value: str) -> str:
+            # "${DTYPE:-bfloat16}" -> "bfloat16"
+            return value.split(":-", 1)[1].rstrip("}") if ":-" in value else value
+
+        assert default(env["DTYPE"]) == v.dtype
+        assert float(default(env["GPU_MEMORY_UTILIZATION"])) == v.gpu_memory_utilization
+        assert int(default(env["MAX_NUM_SEQS"])) == v.max_num_seqs
+        assert int(default(env["MAX_MODEL_LEN"])) == v.max_model_len
+        assert int(default(env["VLLM_CPU_KVCACHE_SPACE"])) == v.cpu_kvcache_space_gib
+        assert int(default(env["VLLM_EXECUTE_MODEL_TIMEOUT_SECONDS"])) == v.cpu_execute_timeout_s
+        assert ("--enforce-eager" in default(env["EXTRA_ARGS"])) == v.enforce_eager
+        assert svc["deploy"] is None, "the CPU profile must drop the GPU reservation"

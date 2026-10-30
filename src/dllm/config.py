@@ -218,6 +218,10 @@ class EvalConfig(_Strict):
 # Serving
 # --------------------------------------------------------------------------- #
 class VllmConfig(_Strict):
+    # ``cuda`` is the production profile. ``cpu`` runs vLLM's own CPU backend
+    # (the official ``vllm/vllm-openai-cpu`` image) behind the same gateway and
+    # the same OpenAI-compatible API, for a host with no NVIDIA GPU.
+    device: Literal["cuda", "cpu"] = "cuda"
     model: str = "artifacts/merged/current"
     served_model_name: str = "domain-sql"
     host: str = "0.0.0.0"
@@ -228,7 +232,25 @@ class VllmConfig(_Strict):
     max_num_seqs: int = 64
     tensor_parallel_size: int = 1
     enable_prefix_caching: bool = True
+    # Skip torch.compile. On CPU the first compile of even a small model takes
+    # several minutes, which is the wrong trade for a smoke test or a laptop.
+    enforce_eager: bool = False
+    # CPU backend only: GiB of host RAM reserved for the KV cache, passed to
+    # vLLM as VLLM_CPU_KVCACHE_SPACE. On CPU, gpu_memory_utilization is the
+    # fraction of host RAM vLLM may claim, despite its name.
+    cpu_kvcache_space_gib: int | None = None
+    # CPU backend only: VLLM_EXECUTE_MODEL_TIMEOUT_SECONDS. A forward pass that
+    # takes longer kills the engine, and the first one on CPU is slow.
+    cpu_execute_timeout_s: int | None = None
     extra_args: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _check_device(self) -> VllmConfig:
+        if self.device == "cuda":
+            for name in ("cpu_kvcache_space_gib", "cpu_execute_timeout_s"):
+                if getattr(self, name) is not None:
+                    raise ValueError(f"serve.vllm.{name} only applies to device: cpu")
+        return self
 
 
 class GatewayConfig(_Strict):

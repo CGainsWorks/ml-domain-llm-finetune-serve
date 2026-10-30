@@ -2,8 +2,11 @@
 #
 #   docker compose up --build
 #
-# Requires a merged checkpoint at ./artifacts/merged/current (make train merge)
-# and GPU passthrough for the vllm service.
+# Requires a merged checkpoint at ./artifacts/merged/current (make train merge,
+# or point MERGED_MODEL_DIR elsewhere) and GPU passthrough for the vllm service.
+#
+# No NVIDIA GPU? Layer docker-compose.cpu.yml on top: same gateway, same API,
+# vLLM's CPU backend instead of CUDA. See that file and configs/serve_cpu.yaml.
 #
 # On Linux that means the NVIDIA container toolkit. On Windows it means Docker
 # Desktop with the WSL2 backend, which registers an `nvidia` runtime and passes
@@ -44,7 +47,7 @@ services:
       #   VLLM_USE_V2_MODEL_RUNNER: "0"
       VLLM_WSL2_ENABLE_PIN_MEMORY: ${VLLM_WSL2_ENABLE_PIN_MEMORY:-1}
     volumes:
-      - ./artifacts/merged/current:/models/current:ro
+      - ${MERGED_MODEL_DIR:-./artifacts/merged/current}:/models/current:ro
       - hf-cache:/root/.cache/huggingface
     expose:
       - "8000"
