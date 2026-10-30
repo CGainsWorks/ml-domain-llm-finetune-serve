@@ -17,6 +17,7 @@ jobs:
   lint-and-test:
     name: lint + unit tests
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
@@ -56,6 +57,7 @@ jobs:
   licence-audit:
     name: licence audit
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -127,16 +129,17 @@ jobs:
             artifacts/smoke_gate.md
 
   docker:
-    name: build images
+    name: build images + CPU serving smoke
     runs-on: ubuntu-latest
     needs: [lint-and-test]
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
 
-      # Only the gateway is built here. The vLLM image is a 10+ GB CUDA base
-      # that a standard runner cannot pull inside the time limit; it is built
-      # in the deploy workflow on a GPU runner.
+      # The CUDA vLLM image is a 10+ GB base that a standard runner cannot pull
+      # inside the time limit; it is built in the deploy workflow on a GPU
+      # runner. The CPU profile's vLLM image is built and run below.
       - name: Build gateway image
         uses: docker/build-push-action@v6
         with:
@@ -170,9 +173,48 @@ jobs:
           fi
           docker rm -f gw
 
+      # CPU serving profile, end to end, on a runner with no GPU: the real
+      # compose files with docker-compose.cpu.yml layered on, vLLM v0.26.0 on
+      # its CPU backend, the gateway in front. The model is a STAND-IN,
+      # HuggingFaceTB/SmolLM2-135M-Instruct (Apache-2.0, revision pinned),
+      # because the fine-tuned weights are not published. This proves the
+      # serving path (engine, API, auth, rate limit, token accounting), not
+      # the model's SQL.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Cache the stand-in model
+        uses: actions/cache@v4
+        with:
+          path: artifacts/ci-standin
+          key: standin-smollm2-135m-instruct-12fd25f77366fa6b3b4b768ec3050bf629380bac
+
+      - name: Fetch the stand-in model
+        run: |
+          if [ -f artifacts/ci-standin/smollm2-135m-instruct/config.json ]; then
+            echo "stand-in model restored from cache"
+            exit 0
+          fi
+          pip install huggingface-hub==1.26.0
+          python -c "
+          from huggingface_hub import snapshot_download
+          snapshot_download(
+              'HuggingFaceTB/SmolLM2-135M-Instruct',
+              revision='12fd25f77366fa6b3b4b768ec3050bf629380bac',
+              local_dir='artifacts/ci-standin/smollm2-135m-instruct',
+              allow_patterns=['*.json', '*.safetensors', 'merges.txt', 'vocab.json'],
+          )"
+
+      - name: CPU serving smoke (vLLM CPU backend + gateway, stand-in model)
+        env:
+          MERGED_MODEL_DIR: ./artifacts/ci-standin/smollm2-135m-instruct
+        run: bash scripts/cpu_serving_smoke.sh
+
   validate-configs:
     name: configs and task definitions
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
